@@ -1,0 +1,22 @@
+{
+  "productName": "Horizon",
+  "version": "0.1.0",
+  "identifier": "com.horizon.app",
+  "build": {
+    "frontendDist": "../src"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Horizon",
+        "width": 1200,
+        "height": 800,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  }
+}
