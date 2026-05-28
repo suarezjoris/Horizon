@@ -1,0 +1,172 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: #0d0d0d;
+  color: #ccc;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Tab bar */
+#tab-bar {
+  display: flex;
+  align-items: stretch;
+  background: #161616;
+  border-bottom: 1px solid #2a2a2a;
+  flex-shrink: 0;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 20px;
+  cursor: pointer;
+  color: #555;
+  font-size: 13px;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s;
+  user-select: none;
+}
+.tab:hover { color: #999; }
+.tab.active { color: #c4b5fd; border-bottom-color: #7c3aed; }
+.tab.disabled { opacity: 0.35; cursor: default; pointer-events: none; }
+
+#settings-btn {
+  margin-left: auto;
+  padding: 10px 14px;
+  cursor: pointer;
+  color: #555;
+  font-size: 16px;
+}
+#settings-btn:hover { color: #999; }
+
+/* Tab panels */
+#panels { flex: 1; overflow: hidden; position: relative; }
+
+.panel {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+}
+.panel.active { display: flex; }
+
+/* Chat panel */
+#chat-history {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bubble-row { display: flex; gap: 8px; align-items: flex-start; }
+.bubble-row.user { flex-direction: row-reverse; }
+
+.avatar {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: bold;
+}
+.avatar.ai { background: #7c3aed; color: white; }
+.avatar.user { background: #2a2a2a; color: #888; }
+
+.bubble {
+  max-width: 75%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.bubble.ai { background: #1a1a1a; border-radius: 0 8px 8px 8px; }
+.bubble.user { background: #7c3aed22; border: 1px solid #7c3aed44; border-radius: 8px 0 8px 8px; color: #c4b5fd; }
+.bubble.streaming { opacity: 0.85; }
+
+/* Input area */
+#chat-input-area {
+  border-top: 1px solid #222;
+  padding: 10px 12px;
+  background: #111;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+#chat-input {
+  flex: 1;
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #ccc;
+  font-size: 13px;
+  resize: none;
+  max-height: 120px;
+  min-height: 36px;
+  font-family: inherit;
+}
+#chat-input:focus { outline: none; border-color: #7c3aed66; }
+
+#send-btn {
+  background: #7c3aed;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+#send-btn:hover { background: #6d28d9; }
+#send-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* Placeholder panels */
+.placeholder-panel {
+  display: flex; align-items: center; justify-content: center;
+  height: 100%;
+  flex-direction: column; gap: 8px;
+}
+.placeholder-panel h2 { color: #444; }
+.placeholder-panel p { color: #333; font-size: 13px; }
+
+/* Settings overlay */
+#settings-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: #00000088;
+  z-index: 100;
+  align-items: center; justify-content: center;
+}
+#settings-overlay.open { display: flex; }
+#settings-panel {
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  padding: 24px;
+  width: 480px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+#settings-panel h3 { color: #c4b5fd; margin-bottom: 4px; }
+.setting-row { display: flex; flex-direction: column; gap: 4px; }
+.setting-row label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+.setting-row input {
+  background: #111; border: 1px solid #333; border-radius: 4px;
+  padding: 6px 8px; color: #ccc; font-size: 13px;
+}
+.setting-row input:focus { outline: none; border-color: #7c3aed66; }
+#settings-save { background: #7c3aed; color: white; border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; align-self: flex-end; font-size: 13px; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
