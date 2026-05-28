@@ -2,6 +2,7 @@
 
 mod ollama;
 mod settings;
+mod vault;
 
 #[tauri::command]
 async fn chat(
@@ -18,6 +19,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             settings::get_settings,
             settings::save_settings,
+            vault::list_notes,
+            vault::read_note,
+            vault::write_note,
             chat,
         ])
         .run(tauri::generate_context!())
