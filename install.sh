@@ -44,7 +44,14 @@ else
     ollama cp qwen2.5-coder:14b gpt-4o || true
 fi
 
-# 5. ComfyUI Setup
+# 5. Install UV (Python package manager)
+echo "📦 Installing uv..."
+if ! command -v uv &> /dev/null; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    source "$HOME/.local/bin/env" || true
+fi
+
+# 6. ComfyUI Setup
 echo "🖼 Setting up ComfyUI..."
 if [ ! -d "$PROJECT_ROOT/ComfyUI" ]; then
     git clone https://github.com/comfyanonymous/ComfyUI.git "$PROJECT_ROOT/ComfyUI"
@@ -52,9 +59,10 @@ fi
 
 cd "$PROJECT_ROOT/ComfyUI"
 if [ ! -d "venv" ]; then
-    python -m venv venv
-    ./venv/bin/pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-    ./venv/bin/pip install -r requirements.txt
+    echo "Creating Python 3.12 virtual environment for ComfyUI to ensure PyTorch compatibility..."
+    ~/.local/bin/uv venv --python 3.12 venv
+    ~/.local/bin/uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+    ~/.local/bin/uv pip install -r requirements.txt
 fi
 
 # Download Pony XL if missing
@@ -66,20 +74,16 @@ if [ ! -f "$MODELS_DIR/ponyDiffusionV6XL_v6.safetensors" ]; then
 fi
 cd "$PROJECT_ROOT"
 
-# 6. Aider Setup (via UV)
+# 7. Aider Setup (via UV)
 echo "💻 Setting up Aider (Code Agent)..."
-if ! command -v uv &> /dev/null; then
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    source "$HOME/.local/bin/env" || true
-fi
 # Install Aider with Python 3.12 to avoid audioop issues on 3.14
 ~/.local/bin/uv tool install --python 3.12 'aider-chat[playwright]' --force
 
-# 7. Vault Initialization
+# 8. Vault Initialization
 echo "📂 Initializing Vault..."
 mkdir -p "$VAULT_PATH/memory" "$VAULT_PATH/images" "$VAULT_PATH/characters"
 
-# 8. Build Application
+# 9. Build Application
 echo "🏗 Building Horizon v2 Release..."
 cd "$PROJECT_ROOT/src-tauri"
 # Update tauri settings to point to the correct ComfyUI path
