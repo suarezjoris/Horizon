@@ -4,6 +4,14 @@ function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === `panel-${name}`));
   activeTab = name;
+
+  if (name === 'image' && window.refreshGallery) {
+    window.refreshGallery();
+  }
+  
+  if (name === 'code' && window.onCodeTabActive) {
+    window.onCodeTabActive();
+  }
 }
 
 // Settings overlay

@@ -1,0 +1,30 @@
+# Rust
+src-tauri/target/
+
+# Node / JS
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Tauri
+src-tauri/gen/
+src-tauri/Cargo.lock
+
+# App logs/temp
+*.log
+.aider.*
+
+# AI Instructions & Plans (Private)
+CLAUDE.md
+docs/superpowers/
+
+# Project Specific Data
+ComfyUI/
+vault/
+images/
+characters/
+embeddings.bin

@@ -4,18 +4,25 @@
   <meta charset="UTF-8">
   <title>Horizon</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="libs/xterm.css">
+  <script src="libs/xterm.js"></script>
+  <script src="libs/xterm-addon-fit.js"></script>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-muPjIW5XQMfkRhqhPZ6MqaFx3pxMIJJaYhHw0gJlGIFKfqIJMDzBSLEXDMkfOVhj8" crossorigin="anonymous">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-sZpDJwwvN2e8byI6DLCoXvCJRuAZJweTN25nZr3+Us9aINzjBQjIFaddcfjSTw/t" crossorigin="anonymous"></script>
 </head>
 <body>
 
 <div id="tab-bar">
   <div class="tab active" data-tab="llm">💬 LLM</div>
-  <div class="tab disabled" data-tab="image">🖼 Image</div>
-  <div class="tab disabled" data-tab="roleplay">🎭 Roleplay</div>
-  <div class="tab disabled" data-tab="code">⌨️ Code <span style="font-size:10px;opacity:.5">soon</span></div>
+  <div class="tab" data-tab="image">🖼 Image</div>
+  <div class="tab" data-tab="roleplay">🎭 Roleplay</div>
+  <div class="tab" data-tab="code">⌨️ Code</div>
   <div id="settings-btn">⚙️</div>
 </div>
 
 <div id="panels">
+  <!-- LLM Panel -->
   <div class="panel active" id="panel-llm">
     <div id="chat-history"></div>
     <div id="chat-input-area">
@@ -24,16 +31,56 @@
     </div>
   </div>
 
+  <!-- Image Panel -->
   <div class="panel" id="panel-image">
-    <div class="placeholder-panel"><h2>🖼 Image Generation</h2><p>Coming in Plan 2</p></div>
+    <div id="image-container">
+      <div id="image-generator-box">
+        <textarea id="image-prompt" placeholder="Describe the image you want to generate..."></textarea>
+        <div id="generate-controls">
+          <div id="gen-status">Ready</div>
+          <button id="generate-btn">Generate Image</button>
+        </div>
+      </div>
+
+      <div id="image-result-preview">
+        <img id="image-result-img" src="" alt="Generated result">
+      </div>
+
+      <div id="gallery-header">Recent Generations</div>
+      <div id="image-gallery">
+        <!-- Gallery items will be injected here -->
+      </div>
+    </div>
   </div>
 
+  <!-- Roleplay Panel -->
   <div class="panel" id="panel-roleplay">
-    <div class="placeholder-panel"><h2>🎭 Roleplay</h2><p>Coming in Plan 3</p></div>
+    <div id="rp-container">
+      <!-- Sidebar / Roster -->
+      <div id="rp-sidebar">
+        <button id="rp-import-btn">Import Card (.png)</button>
+        <div id="rp-roster"></div>
+      </div>
+      
+      <!-- Chat Area -->
+      <div id="rp-chat-area">
+        <div id="rp-header">Select a character</div>
+        <div id="rp-chat-history"></div>
+        <div id="rp-input-area">
+          <textarea id="rp-input" rows="1" placeholder="Type your message..." disabled></textarea>
+          <button id="rp-send-btn" disabled>Send</button>
+        </div>
+      </div>
+    </div>
   </div>
 
+  <!-- Coding AI Panel -->
   <div class="panel" id="panel-code">
-    <div class="placeholder-panel"><h2>⌨️ Coding AI</h2><p>Coming soon — OpenClaude integration</p></div>
+    <div id="oc-terminal-controls">
+      <span id="oc-current-path">Project: ~/Projects/Horizon</span>
+      <button id="oc-change-dir-btn">📂 Change Project</button>
+    </div>
+    <div id="oc-xterm-container"></div>
   </div>
 </div>
 
@@ -49,6 +96,9 @@
 </div>
 
 <script src="modules/llm.js"></script>
+<script src="modules/image.js"></script>
+<script src="modules/roleplay.js"></script>
+<script src="modules/openclaude.js"></script>
 <script src="main.js"></script>
 </body>
 </html>
