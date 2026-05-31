@@ -101,9 +101,36 @@ EOF
 source "$HOME/.cargo/env" || true
 cargo tauri build
 
+# 10. System Integration (Desktop Entry & Icon)
+echo "🖥️ Integrating with system menu..."
+BIN_DEST="$HOME/.local/bin/horizon"
+ICON_DEST="$HOME/.local/share/icons/horizon.png"
+DESKTOP_DEST="$HOME/.local/share/applications/horizon.desktop"
+
+# Copy binary
+cp "$PROJECT_ROOT/src-tauri/target/release/horizon" "$BIN_DEST"
+chmod +x "$BIN_DEST"
+
+# Copy icon (using the one from tauri)
+mkdir -p "$HOME/.local/share/icons"
+cp "$PROJECT_ROOT/src-tauri/icons/icon.png" "$ICON_DEST"
+
+# Create .desktop file
+cat <<EOF > "$DESKTOP_DEST"
+[Desktop Entry]
+Name=Horizon
+Comment=Personal AI Assistant (LLM, Image, Roleplay, Code)
+Exec=$BIN_DEST
+Icon=$ICON_DEST
+Terminal=false
+Type=Application
+Categories=Development;Utility;
+Keywords=ai;llm;chat;code;
+EOF
+
 echo ""
 echo "✅ Installation Complete!"
-echo "Your standalone application is ready in:"
-echo "$PROJECT_ROOT/src-tauri/target/release/bundle/appimage/"
+echo "Horizon is now available in your application menu."
+echo "You can launch it by searching for 'Horizon' or by running '$BIN_DEST' directly."
 echo ""
-echo "You can now run Horizon from your application menu or by double-clicking the AppImage."
+echo "Note: If it doesn't appear immediately, you might need to restart your launcher or run 'update-desktop-database ~/.local/share/applications'"
