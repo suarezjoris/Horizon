@@ -21,7 +21,9 @@ pub async fn start_openclaude(
         let _ = old_child.kill().await;
     }
 
-    let aider_path = "/home/joris/.local/bin/aider";
+    let aider_path = dirs::home_dir()
+        .map(|h| h.join(".local/bin/aider").to_string_lossy().into_owned())
+        .unwrap_or_else(|| "aider".to_string());
 
     let python_wrapper = format!(r#"
 import pty

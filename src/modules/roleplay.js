@@ -50,12 +50,16 @@ async function loadRoster() {
             const assetUrl = getAssetUrl(`${s.vault_path}/${char.avatar_rel_path}`);
             
             card.innerHTML = `
-                <img src="${assetUrl}" alt="${char.name}">
+                <img src="" alt="">
                 <div class="rp-char-info">
-                    <div class="rp-char-name">${char.name}</div>
-                    <div class="rp-char-desc">${char.description}</div>
+                    <div class="rp-char-name"></div>
+                    <div class="rp-char-desc"></div>
                 </div>
             `;
+            card.querySelector('img').src = assetUrl;
+            card.querySelector('img').alt = char.name;
+            card.querySelector('.rp-char-name').textContent = char.name;
+            card.querySelector('.rp-char-desc').textContent = char.description;
             
             card.onclick = () => selectCharacter(char);
             rosterEl.appendChild(card);
@@ -81,7 +85,13 @@ function addBubble(role, text, avatarUrl = null) {
     
     const bubble = document.createElement('div');
     bubble.className = `bubble ${role}`;
-    bubble.textContent = text;
+    
+    if (role === 'ai' && window.marked && window.DOMPurify) {
+        bubble.innerHTML = DOMPurify.sanitize(marked.parse(text));
+    } else {
+        bubble.textContent = text;
+    }
+    
     row.append(avatar, bubble);
     historyEl.appendChild(row);
     historyEl.scrollTop = historyEl.scrollHeight;
@@ -160,6 +170,7 @@ async function sendRpMessage() {
     const avatarUrl = getAssetUrl(`${s.vault_path}/${currentCharacter.avatar_rel_path}`);
     const streamingBubble = addBubble('ai', '', avatarUrl);
     streamingBubble.classList.add('streaming');
+    let accumulatedText = "";
     
     sendBtn.disabled = true;
 
@@ -167,12 +178,18 @@ async function sendRpMessage() {
     if (rpUnlistenDone)  { await rpUnlistenDone();  rpUnlistenDone = null; }
 
     rpUnlistenToken = await safeListen('llm-token', e => {
-        streamingBubble.textContent += e.payload;
+        accumulatedText += e.payload;
+        streamingBubble.textContent = accumulatedText;
         historyEl.scrollTop = historyEl.scrollHeight;
     });
 
     rpUnlistenDone = await safeListen('llm-done', async e => {
         streamingBubble.classList.remove('streaming');
+        if (window.marked && window.DOMPurify) {
+            streamingBubble.innerHTML = DOMPurify.sanitize(marked.parse(e.payload));
+        } else {
+            streamingBubble.textContent = e.payload;
+        }
         sendBtn.disabled = false;
         await rpUnlistenToken(); rpUnlistenToken = null;
         await rpUnlistenDone();  rpUnlistenDone = null;

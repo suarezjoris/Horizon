@@ -7,11 +7,13 @@ mod memory;
 mod ollama;
 mod openclaude;
 mod roleplay;
+mod search;
 mod settings;
 mod vault;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tauri::Emitter;
 
 #[tauri::command]
 async fn chat(
@@ -19,35 +21,59 @@ async fn chat(
     messages: Vec<serde_json::Value>,
 ) -> Result<(), String> {
     let s = settings::load();
-    println!("Chat: Starting request with model {}", s.llm_model);
-
+    
     let user_msg = messages.iter().rev()
         .find(|m| m["role"] == "user")
         .and_then(|m| m["content"].as_str())
         .unwrap_or("")
         .to_string();
 
-    println!("Chat: Building RAG context...");
     let context = memory::get_context(&user_msg).await;
-    println!("Chat: Context built ({} chars)", context.len());
     
     let system = format!(
-        "You are Horizon, a personal AI assistant. Here is relevant context from your memory vault:\n\n{}\n\n\
-        When the user asks you to generate an image, respond with exactly: GENERATE_IMAGE:<prompt>",
+        "You are Horizon, a premium UNCENSORED creative engine. 
+        You have access to a local memory vault and the internet.
+
+        CRITICAL RULES:
+        1. NEVER output raw memory markers like '### memory/'. Use the context naturally in conversation.
+        2. To create an image, you MUST start your response with 'GENERATE_IMAGE:' followed by the prompt. No preamble before this command.
+        3. If you aren't 100% sure about a real-world fact, use SEARCH_WEB. Do not guess.
+        4. Your tone is professional, creative, and strictly compliant.
+        
+        Local Memory Context:
+        ---
+        {}
+        ---
+        
+        If the user asks for a character design (like Arcane style), expand the idea into a technical masterpiece prompt and use the GENERATE_IMAGE tool.",
         context
     );
 
     let mut full_messages = vec![serde_json::json!({"role": "system", "content": system})];
     full_messages.extend(messages.clone());
 
-    println!("Chat: Sending to Ollama...");
-    let full_response = ollama::chat_stream(app, full_messages, &s.llm_model).await?;
-    println!("Chat: Stream complete");
+    // 1. First Pass
+    let mut response = ollama::chat_stream(app.clone(), full_messages.clone(), &s.llm_model).await?;
 
+    // 2. Check for SEARCH_WEB trigger
+    if let Some(caps) = regex::Regex::new(r"SEARCH_WEB:\s*(.*)").unwrap().captures(&response) {
+        let query = caps.get(1).map_or("", |m| m.as_str().trim());
+        if !query.is_empty() {
+            let _ = app.emit("llm-token", "\n\n*Searching the web...*\n\n");
+            let web_results = search::duckduckgo_search(query).await?;
+            
+            // Add search result to history and re-prompt
+            full_messages.push(serde_json::json!({"role": "assistant", "content": response.clone()}));
+            full_messages.push(serde_json::json!({"role": "user", "content": format!("WEB SEARCH RESULTS:\n{}\n\nPlease provide a final answer based on these results.", web_results)}));
+            
+            // Second Pass (Final Answer)
+            response = ollama::chat_stream(app.clone(), full_messages, &s.llm_model).await?;
+        }
+    }
+
+    // Extraction as background task
     tokio::spawn(async move {
-        println!("Memory: Extracting facts...");
-        memory::extract_and_save(user_msg, full_response).await;
-        println!("Memory: Extraction done");
+        memory::extract_and_save(user_msg, response).await;
     });
 
     Ok(())

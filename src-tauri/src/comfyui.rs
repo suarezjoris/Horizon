@@ -66,27 +66,48 @@ pub async fn generate_image(prompt: String) -> Result<Vec<u8>, String> {
     let _ = ollama::unload(&s.llm_model).await;
 
     // 2. Load workflow template
-    let mut workflow_path = std::env::current_dir()
-        .unwrap_or_default()
-        .join("assets/comfyui-default-workflow.json");
-    
-    // If not found, try parent directory (common in tauri dev)
-    if !workflow_path.exists() {
-        if let Ok(parent) = std::env::current_dir().unwrap_or_default().parent().ok_or("no parent") {
-            let alt_path = parent.join("assets/comfyui-default-workflow.json");
-            if alt_path.exists() {
-                workflow_path = alt_path;
+    let current_dir = std::env::current_dir().unwrap_or_default();
+    let mut paths_to_try = vec![
+        current_dir.join("assets/comfyui-default-workflow.json"),
+        current_dir.parent().map(|p| p.join("assets/comfyui-default-workflow.json")).unwrap_or_default(),
+    ];
+
+    // Try relative to the executable path (useful when running the built binary)
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            paths_to_try.push(exe_dir.join("assets/comfyui-default-workflow.json"));
+            // In dev mode, the exe is in target/debug/, assets are 2 levels up
+            if let Some(parent) = exe_dir.parent() {
+                if let Some(grandparent) = parent.parent() {
+                    paths_to_try.push(grandparent.join("assets/comfyui-default-workflow.json"));
+                }
             }
+        }
+    }
+    
+    // Fallback for system installation (absolute path to the source for now)
+    if let Some(home) = dirs::home_dir() {
+        paths_to_try.push(home.join("Projects/Horizon/assets/comfyui-default-workflow.json"));
+        paths_to_try.push(home.join("Projects/Horizon/src-tauri/assets/comfyui-default-workflow.json"));
+    }
+
+    let mut workflow_path = paths_to_try[0].clone();
+    let mut found = false;
+    for path in paths_to_try {
+        if path.exists() {
+            workflow_path = path;
+            found = true;
+            break;
         }
     }
 
     println!("ComfyUI: Loading workflow from {:?}", workflow_path);
     
-    let mut workflow: Value = if workflow_path.exists() {
-        let content = std::fs::read_to_string(workflow_path).map_err(|e| e.to_string())?;
+    let mut workflow: Value = if found {
+        let content = std::fs::read_to_string(&workflow_path).map_err(|e| format!("{}: {:?}", e, workflow_path))?;
         serde_json::from_str(&content).map_err(|e| e.to_string())?
     } else {
-        return Err("Workflow template missing at assets/comfyui-default-workflow.json".into());
+        return Err(format!("Workflow template missing at assets/comfyui-default-workflow.json. Tried: {:?}", workflow_path).into());
     };
 
     // 3. Inject prompt and randomize seed
@@ -107,7 +128,7 @@ pub async fn generate_image(prompt: String) -> Result<Vec<u8>, String> {
                     // Check if this is the positive prompt node (ours has "masterpiece" in template)
                     if let Some(text) = inputs.get("text").and_then(|v| v.as_str()) {
                         if text.contains("masterpiece") {
-                            inputs["text"] = Value::String(format!("score_9, score_8_up, score_7_up, rating_explicit, {}, masterpiece, highly detailed", prompt));
+                            inputs["text"] = Value::String(format!("score_9, score_8_up, score_7_up, {}, {}, masterpiece, highly detailed", s.image_rating, prompt));
                             found = true;
                         }
                     }

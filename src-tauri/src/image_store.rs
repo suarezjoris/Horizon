@@ -102,11 +102,15 @@ pub fn list_gallery() -> Result<Vec<GalleryImage>, String> {
 
 #[tauri::command]
 pub fn delete_image(path: String) -> Result<(), String> {
-    let img_path = PathBuf::from(&path);
+    let mut img_path = PathBuf::from(&path);
     
     // Safety check to ensure we only delete from our vault/images folder
     let s = settings::load();
-    let images_dir = PathBuf::from(&s.vault_path).join("images");
+    let mut images_dir = PathBuf::from(&s.vault_path).join("images");
+    
+    // Canonicalize to resolve any '..' components
+    images_dir = images_dir.canonicalize().map_err(|e| format!("Invalid images dir: {}", e))?;
+    img_path = img_path.canonicalize().map_err(|e| format!("Invalid image path: {}", e))?;
     
     if !img_path.starts_with(&images_dir) {
         return Err("Unauthorized path deletion".to_string());

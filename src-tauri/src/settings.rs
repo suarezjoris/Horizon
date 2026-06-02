@@ -8,6 +8,7 @@ pub struct Settings {
     pub roleplay_model: String,
     pub comfyui_path: String,
     pub embeddings_path: String,
+    pub image_rating: String,
 }
 
 impl Default for Settings {
@@ -20,6 +21,7 @@ impl Default for Settings {
             roleplay_model: "llama3.1:8b".to_string(),
             comfyui_path: home.join("ComfyUI/main.py").to_string_lossy().into_owned(),
             embeddings_path: data.join("horizon/embeddings.bin").to_string_lossy().into_owned(),
+            image_rating: "rating_safe".to_string(),
         }
     }
 }

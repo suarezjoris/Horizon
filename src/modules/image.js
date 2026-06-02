@@ -40,10 +40,12 @@ async function loadGallery() {
             const url = getAssetUrl(img.path);
             
             item.innerHTML = `
-                <img src="${url}" alt="gen">
-                <div class="gallery-item-info">${img.prompt || img.date}</div>
+                <img src="" alt="gen">
+                <div class="gallery-item-info"></div>
                 <button class="delete-btn" title="Delete image">🗑️</button>
             `;
+            item.querySelector('img').src = url;
+            item.querySelector('.gallery-item-info').textContent = img.prompt || img.date;
             
             item.querySelector('img').onclick = () => {
                 promptInput.value = img.prompt;

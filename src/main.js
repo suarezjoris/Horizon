@@ -15,14 +15,17 @@ function switchTab(name) {
 }
 
 // Settings overlay
+let currentSettings = {};
+
 document.getElementById('settings-btn').addEventListener('click', async () => {
   const overlay = document.getElementById('settings-overlay');
   overlay.classList.add('open');
-  const s = await window.__TAURI__.core.invoke('get_settings');
-  document.getElementById('s-vault').value = s.vault_path;
-  document.getElementById('s-llm').value = s.llm_model;
-  document.getElementById('s-rp').value = s.roleplay_model;
-  document.getElementById('s-comfy').value = s.comfyui_path;
+  currentSettings = await window.__TAURI__.core.invoke('get_settings');
+  document.getElementById('s-vault').value = currentSettings.vault_path;
+  document.getElementById('s-llm').value = currentSettings.llm_model;
+  document.getElementById('s-rp').value = currentSettings.roleplay_model;
+  document.getElementById('s-comfy').value = currentSettings.comfyui_path;
+  document.getElementById('s-rating').value = currentSettings.image_rating || 'rating_safe';
 });
 
 document.getElementById('settings-overlay').addEventListener('click', e => {
@@ -30,15 +33,17 @@ document.getElementById('settings-overlay').addEventListener('click', e => {
 });
 
 document.getElementById('settings-save').addEventListener('click', async () => {
-  await window.__TAURI__.core.invoke('save_settings', {
-    settings: {
-      vault_path: document.getElementById('s-vault').value,
-      llm_model: document.getElementById('s-llm').value,
-      roleplay_model: document.getElementById('s-rp').value,
-      comfyui_path: document.getElementById('s-comfy').value,
-      embeddings_path: '',
-    }
-  });
+  const settings = {
+    ...currentSettings,
+    vault_path: document.getElementById('s-vault').value,
+    llm_model: document.getElementById('s-llm').value,
+    roleplay_model: document.getElementById('s-rp').value,
+    comfyui_path: document.getElementById('s-comfy').value,
+    image_rating: document.getElementById('s-rating').value
+  };
+
+  await window.__TAURI__.core.invoke('save_settings', { settings });
+  currentSettings = settings;
   document.getElementById('settings-overlay').classList.remove('open');
 });
 

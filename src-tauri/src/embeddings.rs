@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use once_cell::sync::Lazy;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Entry {
@@ -8,6 +10,8 @@ pub struct Entry {
     pub chunk: String,
     pub vector: Vec<f32>,
 }
+
+static INDEX_CACHE: Lazy<Mutex<Option<Arc<Vec<Entry>>>>> = Lazy::new(|| Mutex::new(None));
 
 pub fn chunk_text(text: &str, size: usize, overlap: usize) -> Vec<String> {
     let mut chunks = Vec::new();
@@ -26,7 +30,7 @@ pub fn search<'a>(index: &'a [Entry], query: &[f32], k: usize) -> Vec<&'a Entry>
     let mut scored: Vec<(f32, &Entry)> = index.iter()
         .map(|e| (cosine_similarity(query, &e.vector), e))
         .collect();
-    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0));
     scored.into_iter().take(k).map(|(_, e)| e).collect()
 }
 
@@ -44,15 +48,32 @@ pub fn save_index(index: &[Entry], path: &str) {
     if let Ok(data) = bincode::serialize(index) {
         let _ = fs::write(path, data);
     }
+    // Update cache
+    if let Ok(mut cache) = INDEX_CACHE.lock() {
+        *cache = Some(Arc::new(index.to_vec()));
+    }
 }
 
-pub fn load_index(path: &str) -> Vec<Entry> {
-    if let Ok(data) = fs::read(path) {
-        if let Ok(index) = bincode::deserialize(&data) {
-            return index;
+pub fn load_index(path: &str) -> Arc<Vec<Entry>> {
+    if let Ok(mut cache) = INDEX_CACHE.lock() {
+        if let Some(idx) = cache.as_ref() {
+            return idx.clone();
         }
+        
+        // Cache miss, load from disk
+        if let Ok(data) = fs::read(path) {
+            if let Ok(index) = bincode::deserialize::<Vec<Entry>>(&data) {
+                let arc_index = Arc::new(index);
+                *cache = Some(arc_index.clone());
+                return arc_index;
+            }
+        }
+        
+        let empty_idx = Arc::new(vec![]);
+        *cache = Some(empty_idx.clone());
+        return empty_idx;
     }
-    vec![]
+    Arc::new(vec![])
 }
 
 #[tauri::command]

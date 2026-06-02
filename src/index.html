@@ -7,9 +7,6 @@
   <link rel="stylesheet" href="libs/xterm.css">
   <script src="libs/xterm.js"></script>
   <script src="libs/xterm-addon-fit.js"></script>
-
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-muPjIW5XQMfkRhqhPZ6MqaFx3pxMIJJaYhHw0gJlGIFKfqIJMDzBSLEXDMkfOVhj8" crossorigin="anonymous">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" integrity="sha384-sZpDJwwvN2e8byI6DLCoXvCJRuAZJweTN25nZr3+Us9aINzjBQjIFaddcfjSTw/t" crossorigin="anonymous"></script>
 </head>
 <body>
 
@@ -91,10 +88,19 @@
     <div class="setting-row"><label>LLM model</label><input id="s-llm" type="text"></div>
     <div class="setting-row"><label>Roleplay model</label><input id="s-rp" type="text"></div>
     <div class="setting-row"><label>ComfyUI path</label><input id="s-comfy" type="text"></div>
+    <div class="setting-row">
+      <label>Image Rating</label>
+      <select id="s-rating">
+        <option value="rating_safe">Safe</option>
+        <option value="rating_explicit">Explicit (NSFW)</option>
+      </select>
+    </div>
     <button id="settings-save">Save</button>
   </div>
 </div>
 
+<script src="libs/purify.min.js"></script>
+<script src="libs/marked.min.js"></script>
 <script src="modules/llm.js"></script>
 <script src="modules/image.js"></script>
 <script src="modules/roleplay.js"></script>
