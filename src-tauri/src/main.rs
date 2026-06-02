@@ -97,6 +97,20 @@ async fn search_vault(query: String) -> Result<Vec<String>, String> {
 }
 
 fn main() {
+    // v2.03 Stability: Ensure all required directories exist before startup
+    let s = settings::load();
+    let data_dir = std::path::PathBuf::from(&s.embeddings_path).parent().unwrap().to_path_buf();
+    let config_dir = dirs::config_dir().unwrap().join("horizon");
+    let vault_images = std::path::PathBuf::from(&s.vault_path).join("images");
+    let vault_chars = std::path::PathBuf::from(&s.vault_path).join("characters");
+    let vault_memory = std::path::PathBuf::from(&s.vault_path).join("memory");
+
+    let _ = std::fs::create_dir_all(&data_dir);
+    let _ = std::fs::create_dir_all(&config_dir);
+    let _ = std::fs::create_dir_all(&vault_images);
+    let _ = std::fs::create_dir_all(&vault_chars);
+    let _ = std::fs::create_dir_all(&vault_memory);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
