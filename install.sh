@@ -128,6 +128,8 @@ Categories=Development;Utility;
 Keywords=ai;llm;chat;code;
 EOF
 
+update-desktop-database "$HOME/.local/share/applications" || true
+
 echo ""
 echo "✅ Installation Complete!"
 echo "Horizon is now available in your application menu."

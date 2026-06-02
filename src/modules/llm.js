@@ -31,15 +31,56 @@ function addBubble(role, text) {
   return bubble;
 }
 
+const attachBtn = document.getElementById('attach-btn');
+const filePreviewArea = document.getElementById('file-preview-area');
+let attachedFilesText = "";
+let attachedFileNames = [];
+
+attachBtn.addEventListener('click', async () => {
+  try {
+    const file = await window.__TAURI__.dialog.open({
+      multiple: false,
+      title: 'Select a file to extract'
+    });
+    if (file) {
+      filePreviewArea.style.display = 'block';
+      filePreviewArea.textContent = `Extracting ${file}...`;
+      
+      const content = await invoke('read_file_content', { path: file });
+      attachedFilesText += `\n\n--- Content from ${file} ---\n${content}\n---\n`;
+      attachedFileNames.push(file.split('/').pop().split('\\').pop());
+      
+      filePreviewArea.textContent = `Attached: ${attachedFileNames.join(', ')}`;
+    }
+  } catch (err) {
+    filePreviewArea.style.display = 'block';
+    filePreviewArea.textContent = `Error reading file: ${err}`;
+  }
+});
+
 async function send() {
-  const text = input.value.trim();
-  if (!text || sendBtn.disabled) return;
+  let userText = input.value.trim();
+  let llmText = userText;
+  let displayText = userText;
+
+  if (!userText && !attachedFilesText) return;
+  if (sendBtn.disabled) return;
+  
+  if (attachedFilesText) {
+    llmText += "\n" + attachedFilesText;
+    displayText += "\n\n📎 Attached: " + attachedFileNames.join(', ');
+    attachedFilesText = "";
+    attachedFileNames = [];
+    filePreviewArea.style.display = 'none';
+    filePreviewArea.textContent = '';
+  }
+
   input.value = '';
   input.style.height = 'auto';
   
   // Handle Commands
-  if (text.startsWith('/')) {
-    const [cmd, ...args] = text.slice(1).split(' ');
+  if (llmText.startsWith('/')) {
+    const [cmd, ...args] = llmText.slice(1).split(' ');
     const query = args.join(' ');
 
     if (cmd === 'clear') {
@@ -92,8 +133,8 @@ async function send() {
   }
 
   sendBtn.disabled = true;
-  addBubble('user', text);
-  messages.push({ role: 'user', content: text });
+  addBubble('user', displayText);
+  messages.push({ role: 'user', content: llmText });
 
   streamingBubble = addBubble('ai', '');
   streamingBubble.classList.add('streaming');
@@ -147,6 +188,29 @@ async function send() {
     sendBtn.disabled = false;
   }
 }
+
+// Drag and Drop support
+listen('tauri://file-drop', async event => {
+  const activeTab = document.querySelector('.tab.active');
+  if (activeTab && activeTab.dataset.tab !== 'llm') return;
+  
+  const files = event.payload;
+  if (files && files.length > 0) {
+    filePreviewArea.style.display = 'block';
+    filePreviewArea.textContent = `Extracting ${files.length} file(s)...`;
+    
+    try {
+      for (const file of files) {
+        const content = await invoke('read_file_content', { path: file });
+        attachedFilesText += `\n\n--- Content from ${file} ---\n${content}\n---\n`;
+        attachedFileNames.push(file.split('/').pop().split('\\').pop());
+      }
+      filePreviewArea.textContent = `Attached: ${attachedFileNames.join(', ')}`;
+    } catch (err) {
+      filePreviewArea.textContent = `Error reading file: ${err}`;
+    }
+  }
+});
 
 sendBtn.addEventListener('click', send);
 input.addEventListener('keydown', e => {

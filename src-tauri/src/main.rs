@@ -2,6 +2,7 @@
 
 mod comfyui;
 mod embeddings;
+mod file_reader;
 mod image_store;
 mod memory;
 mod ollama;
@@ -115,6 +116,7 @@ fn main() {
             vault::write_note,
             embeddings::reindex,
             search_vault,
+            file_reader::read_file_content,
 
             // Image Generation (ComfyUI)
             comfyui::check_comfyui,
