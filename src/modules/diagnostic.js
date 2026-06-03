@@ -31,7 +31,7 @@
                         <div class="diagnostic-name">${res.name}</div>
                         <div class="diagnostic-msg">${res.message}</div>
                     </div>
-                    ${!res.status && res.fixable ? `<button class="fix-btn" data-name="${res.name}">🔧 Fix</button>` : ''}
+                    ${!res.status && res.fixable ? `<button class="fix-btn" data-name="${res.name}">Fix</button>` : ''}
                 `;
                 
                 list.appendChild(item);
@@ -59,7 +59,7 @@
                     } catch (e) {
                         alert("Fix failed: " + e);
                         btn.disabled = false;
-                        btn.textContent = "🔧 Fix";
+                        btn.textContent = "Fix";
                     }
                 };
             });
