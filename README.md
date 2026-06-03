@@ -7,7 +7,7 @@
 *Built with Rust, Tauri v2, Vanilla JS, Ollama, and ComfyUI.*
 
 [![Version](https://img.shields.io/badge/version-v2.05-d4af37.svg)](https://github.com/suarezjoris/Horizon/releases)
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Arch-00f2ff.svg)]()
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-00f2ff.svg)]()
 [![Rust](https://img.shields.io/badge/rust-backend-orange.svg)]()
 
 </div>
@@ -39,7 +39,7 @@ Horizon is built for performance and absolute local control:
 
 ## 🚀 Installation
 
-Horizon is currently optimized for **Arch Linux**.
+### 🐧 Linux (Arch)
 
 1. **Clone the repository:**
    ```bash
@@ -55,6 +55,22 @@ Horizon is currently optimized for **Arch Linux**.
 
 3. **Launch:**
    Open "Horizon" from your Linux application launcher, or run `~/.local/bin/horizon`.
+
+### 🪟 Windows
+
+1. **Download the installer:** grab the latest `Horizon_x.y.z_x64_en-US.msi` (or `..._x64-setup.exe`) from the [Releases page](https://github.com/suarezjoris/Horizon/releases).
+
+   > The installer is unsigned, so Windows SmartScreen may warn *"Windows protected your PC"*. Click **More info → Run anyway**.
+
+2. **Install it**, then provision the runtime (Python env, ComfyUI, models):
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File setup-windows.ps1
+   ```
+   *Prerequisites: [Ollama for Windows](https://ollama.com) and [Git](https://git-scm.com/download/win). The script clones the source to `%USERPROFILE%\Projects\Horizon` and sets up the Python venv, ComfyUI, and the Pony XL model.*
+
+3. **Launch** "Horizon" from the Start Menu (make sure Ollama is running).
+
+   > **Note:** Chat, Roleplay, Notes, Web Search, Audio and Image Generation work on Windows. The **Code tab (Aider) is not yet available on Windows.**
 
 ## 🛡️ Diagnostics & Auto-Repair
 

@@ -1,0 +1,51 @@
+name: Build Windows Installer
+
+# Push a version tag (e.g. `git tag v2.0.5 && git push origin v2.0.5`) to build the
+# Windows .msi + .exe and publish them to a draft GitHub Release.
+# Or trigger manually from the Actions tab to download the installers as run artifacts.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Build Tauri app (.msi + .exe)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # On a tag push -> create a draft GitHub Release with the installers attached.
+          # On manual dispatch -> tagName is empty, so no release is created (see upload step below).
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('Horizon {0}', github.ref_name) || '' }}
+          releaseDraft: true
+          prerelease: false
+          args: --bundles msi,nsis
+
+      - name: Upload installers as artifacts (manual runs)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: horizon-windows-installers
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error

@@ -24,31 +24,39 @@ pub async fn check_comfyui() -> bool {
 #[tauri::command]
 pub fn spawn_comfyui() -> Result<(), String> {
     let s = settings::load();
-    let path = std::path::Path::new(&s.comfyui_path);
-    if !path.exists() {
-        return Err(format!("ComfyUI not found at {}", s.comfyui_path));
+    
+    // Security Fix: Canonicalize and validate path
+    let path = std::fs::canonicalize(&s.comfyui_path)
+        .map_err(|_| format!("Invalid ComfyUI path: {}", s.comfyui_path))?;
+
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    let allowed_root = home.join("Projects");
+
+    // Must be inside ~/Projects and must be a main.py file
+    if !path.starts_with(&allowed_root) || path.file_name() != Some(std::ffi::OsStr::new("main.py")) {
+        return Err("Security Error: ComfyUI path must be a 'main.py' file inside your Projects directory.".into());
     }
 
-    let parent = path.parent().ok_or("Invalid ComfyUI path")?;
+    let parent = path.parent().ok_or("Invalid ComfyUI parent directory")?;
     
     // Check for virtual environment
-    let venv_python = parent.join("venv/bin/python3");
+    let venv_python = crate::pyenv::venv_python(&parent.join("venv"));
     println!("ComfyUI: Checking for venv at {:?}", venv_python);
-    
+
     let python_exe = if venv_python.exists() {
         let exe = venv_python.to_string_lossy().into_owned();
         println!("ComfyUI: Found venv! Using {}", exe);
         exe
     } else {
-        println!("ComfyUI: Venv NOT found, falling back to system python3");
-        "python3".to_string()
+        println!("ComfyUI: Venv NOT found, falling back to system python");
+        crate::pyenv::system_python().to_string()
     };
 
     let log_file = std::fs::File::create(parent.join("comfyui.log")).map_err(|e| e.to_string())?;
     let err_file = log_file.try_clone().map_err(|e| e.to_string())?;
 
     Command::new(python_exe)
-        .arg(path)
+        .arg(&path)
         .current_dir(parent)
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(err_file))

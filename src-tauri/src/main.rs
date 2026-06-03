@@ -7,6 +7,7 @@ mod image_store;
 mod memory;
 mod ollama;
 mod openclaude;
+mod pyenv;
 mod audio;
 mod diagnostic;
 mod roleplay;

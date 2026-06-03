@@ -1,6 +1,6 @@
 {
   "productName": "Horizon",
-  "version": "0.1.0",
+  "version": "2.0.5",
   "identifier": "com.horizon.app",
   "build": {
     "frontendDist": "../src"
@@ -22,5 +22,18 @@
         "scope": ["$HOME/Documents/Claude RAG/images/**", "$HOME/Documents/Claude RAG/characters/**"]
       }
     }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "publisher": "Joris Suarez",
+    "category": "Productivity"
   }
 }
