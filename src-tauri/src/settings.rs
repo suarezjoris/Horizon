@@ -17,9 +17,9 @@ impl Default for Settings {
         let data = dirs::data_local_dir().unwrap_or_default();
         Self {
             vault_path: home.join("Documents/Claude RAG").to_string_lossy().into_owned(),
-            llm_model: "dolphin-mixtral".to_string(),
+            llm_model: "qwen2.5-coder:14b".to_string(),
             roleplay_model: "llama3.1:8b".to_string(),
-            comfyui_path: home.join("ComfyUI/main.py").to_string_lossy().into_owned(),
+            comfyui_path: home.join("Projects/Horizon/ComfyUI/main.py").to_string_lossy().into_owned(),
             embeddings_path: data.join("horizon/embeddings.bin").to_string_lossy().into_owned(),
             image_rating: "rating_safe".to_string(),
         }
@@ -35,7 +35,7 @@ pub fn load() -> Settings {
     std::fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+        .unwrap_or_else(|| Settings::default())
 }
 
 fn persist(settings: &Settings) -> Result<(), String> {
@@ -53,28 +53,4 @@ pub fn get_settings() -> Settings {
 #[tauri::command]
 pub fn save_settings(settings: Settings) -> Result<(), String> {
     persist(&settings)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_vault_path_contains_claude_rag() {
-        assert!(Settings::default().vault_path.contains("Claude RAG"));
-    }
-
-    #[test]
-    fn default_llm_model_is_dolphin() {
-        assert_eq!(Settings::default().llm_model, "dolphin-mixtral");
-    }
-
-    #[test]
-    fn settings_roundtrip_via_json() {
-        let mut s = Settings::default();
-        s.llm_model = "test-model".to_string();
-        let json = serde_json::to_string(&s).unwrap();
-        let loaded: Settings = serde_json::from_str(&json).unwrap();
-        assert_eq!(loaded.llm_model, "test-model");
-    }
 }

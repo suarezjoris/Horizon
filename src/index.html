@@ -7,8 +7,31 @@
   <link rel="stylesheet" href="libs/xterm.css">
   <script src="libs/xterm.js"></script>
   <script src="libs/xterm-addon-fit.js"></script>
+  <script src="modules/diagnostic.js"></script>
 </head>
 <body>
+
+<div id="diagnostic-overlay">
+  <div id="diagnostic-box">
+    <div id="diagnostic-header">
+      <div id="diagnostic-logo">H</div>
+      <div id="diagnostic-title">Horizon System Check</div>
+    </div>
+    <div id="diagnostic-list">
+      <!-- Diagnostics will be injected here -->
+      <div class="diagnostic-item loading">
+        <div class="status-dot"></div>
+        <div class="diagnostic-info">
+          <div class="diagnostic-name">Initializing...</div>
+          <div class="diagnostic-msg">Checking system dependencies</div>
+        </div>
+      </div>
+    </div>
+    <div id="diagnostic-footer">
+      <button id="start-app-btn" disabled>Entering Horizon...</button>
+    </div>
+  </div>
+</div>
 
 <div id="tab-bar">
   <div class="tab active" data-tab="llm">💬 LLM</div>
@@ -125,6 +148,7 @@
 
 <script src="libs/purify.min.js"></script>
 <script src="libs/marked.min.js"></script>
+<script src="modules/diagnostic.js"></script>
 <script src="modules/llm.js"></script>
 <script src="modules/image.js"></script>
 <script src="modules/roleplay.js"></script>

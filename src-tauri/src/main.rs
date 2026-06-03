@@ -8,6 +8,7 @@ mod memory;
 mod ollama;
 mod openclaude;
 mod audio;
+mod diagnostic;
 mod roleplay;
 mod search;
 mod settings;
@@ -173,6 +174,10 @@ fn main() {
             // Audio
             audio::save_audio_temp,
             audio::transcribe_audio,
+
+            // Diagnostic
+            diagnostic::run_diagnostics,
+            diagnostic::fix_health_issue,
 
             // OpenClaude (Coding AI)
             openclaude::start_openclaude,
