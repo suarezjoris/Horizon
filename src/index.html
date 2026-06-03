@@ -14,6 +14,7 @@
   <div class="tab active" data-tab="llm">💬 LLM</div>
   <div class="tab" data-tab="image">🖼 Image</div>
   <div class="tab" data-tab="roleplay">🎭 Roleplay</div>
+  <div class="tab" data-tab="notes">📝 Notes</div>
   <div class="tab" data-tab="code">⌨️ Code</div>
   <div id="settings-btn">⚙️</div>
 </div>
@@ -25,6 +26,7 @@
     <div id="file-preview-area" style="display: none; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 12px; font-size: 12px; color: var(--accent-teal); border: var(--border-glass); margin-bottom: -10px;"></div>
     <div id="chat-input-area">
       <button id="attach-btn" style="background: transparent; border: none; color: var(--text-dim); font-size: 18px; cursor: pointer; transition: color 0.2s;">📎</button>
+      <button id="mic-btn" style="background: transparent; border: none; color: var(--text-dim); font-size: 18px; cursor: pointer; transition: color 0.2s;">🎤</button>
       <textarea id="chat-input" rows="1" placeholder="Ask anything or drop a file here... (/clear /memory /search /reindex)"></textarea>
       <button id="send-btn">Send</button>
     </div>
@@ -73,6 +75,26 @@
     </div>
   </div>
 
+  <!-- Notes (Obsidian) Panel -->
+  <div class="panel" id="panel-notes">
+    <div id="notes-container">
+      <div id="notes-sidebar">
+        <div id="notes-list-header">
+          <span>My Notes</span>
+          <button id="new-note-btn">+</button>
+        </div>
+        <div id="notes-list"></div>
+      </div>
+      <div id="notes-editor-area">
+        <input type="text" id="note-title" placeholder="Note Title...">
+        <textarea id="note-content" placeholder="Write your thoughts here..."></textarea>
+        <div id="note-controls">
+          <button id="save-note-btn">Save Note</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Coding AI Panel -->
   <div class="panel" id="panel-code">
     <div id="oc-terminal-controls">
@@ -107,6 +129,7 @@
 <script src="modules/image.js"></script>
 <script src="modules/roleplay.js"></script>
 <script src="modules/openclaude.js"></script>
+<script src="modules/notes.js"></script>
 <script src="main.js"></script>
 </body>
 </html>

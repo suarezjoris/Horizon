@@ -31,6 +31,59 @@ function addBubble(role, text) {
   return bubble;
 }
 
+const micBtn = document.getElementById('mic-btn');
+let mediaRecorder = null;
+let audioChunks = [];
+
+micBtn.addEventListener('click', async () => {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+    micBtn.classList.remove('recording');
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
+    audioChunks = [];
+
+    mediaRecorder.ondataavailable = (event) => {
+      audioChunks.push(event.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+      const reader = new FileReader();
+      reader.readAsDataURL(audioBlob);
+      reader.onloadend = async () => {
+        const base64data = reader.result.split(',')[1];
+        micBtn.style.opacity = '0.5';
+        input.placeholder = "Transcribing audio...";
+        
+        try {
+          const tempPath = await invoke('save_audio_temp', { base64Data: base64data });
+          const text = await invoke('transcribe_audio', { audioPath: tempPath });
+          input.value += (input.value ? " " : "") + text;
+          input.placeholder = "Ask anything or drop a file here...";
+          input.dispatchEvent(new Event('input')); // trigger auto-resize
+        } catch (err) {
+          alert("Transcription error: " + err);
+        } finally {
+          micBtn.style.opacity = '1';
+        }
+      };
+      
+      // Stop all tracks to release microphone
+      stream.getTracks().forEach(track => track.stop());
+    };
+
+    mediaRecorder.start();
+    micBtn.classList.add('recording');
+  } catch (err) {
+    alert("Microphone access denied or not available: " + err);
+  }
+});
+
 const attachBtn = document.getElementById('attach-btn');
 const filePreviewArea = document.getElementById('file-preview-area');
 let attachedFilesText = "";
@@ -144,6 +197,11 @@ async function send() {
   if (unlistenDone)  { await unlistenDone();  unlistenDone = null; }
 
   unlistenToken = await listen('llm-token', e => {
+    if (e.payload === "CLEAR_AND_SEARCH") {
+      accumulatedText = "*🌐 Horizon is searching the web...*\n\n";
+      streamingBubble.textContent = accumulatedText;
+      return;
+    }
     accumulatedText += e.payload;
     streamingBubble.textContent = accumulatedText;
     history.scrollTop = history.scrollHeight;

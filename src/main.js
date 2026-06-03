@@ -1,4 +1,5 @@
 let activeTab = 'llm';
+let currentProjectPath = "/home/joris/Projects/Horizon";
 
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
@@ -10,9 +11,21 @@ function switchTab(name) {
   }
   
   if (name === 'code' && window.onCodeTabActive) {
-    window.onCodeTabActive();
+    window.onCodeTabActive(currentProjectPath);
+  }
+
+  if (name === 'notes' && window.onNotesTabActive) {
+    window.onNotesTabActive();
   }
 }
+
+// Share project path between modules
+window.getCurrentProjectPath = () => currentProjectPath;
+window.setCurrentProjectPath = (p) => { 
+  currentProjectPath = p;
+  const pathDisplay = document.getElementById('oc-current-path');
+  if (pathDisplay) pathDisplay.textContent = `Project: ${p.replace('/home/joris', '~')}`;
+};
 
 // Settings overlay
 let currentSettings = {};

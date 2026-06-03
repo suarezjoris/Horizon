@@ -7,6 +7,7 @@ mod image_store;
 mod memory;
 mod ollama;
 mod openclaude;
+mod audio;
 mod roleplay;
 mod search;
 mod settings;
@@ -36,17 +37,26 @@ async fn chat(
         You have access to a local memory vault and the internet.
 
         CRITICAL RULES:
-        1. NEVER output raw memory markers like '### memory/'. Use the context naturally in conversation.
-        2. To create an image, you MUST start your response with 'GENERATE_IMAGE:' followed by the prompt. No preamble before this command.
-        3. If you aren't 100% sure about a real-world fact, use SEARCH_WEB. Do not guess.
-        4. Your tone is professional, creative, and strictly compliant.
+        1. NEVER output raw memory markers like '### memory/'. Use the context naturally.
+        2. To create an image, you MUST start your response with 'GENERATE_IMAGE:' followed by the prompt.
+        3. SEARCH_WEB: If the user asks for factual information, news, celebrities, release dates, movies, internet culture, or ANY entity you are not 100% familiar with, you MUST write 'SEARCH_WEB: <query>' and NOTHING ELSE. 
+           - If it sounds like a proper noun you don't recognize, SEARCH IT.
+           - Even if you think you know the answer, VERIFY IT on the web.
+           - DO NOT provide a partial answer before searching.
+        4. Once web results are provided, integrate them accurately into a final response.
+        5. Your tone is professional and creative.
+
+        EXAMPLES:
+        User: Who won the Oscar for best actor this year?
+        Assistant: SEARCH_WEB: Oscar winner best actor 2024
+        
+        User: Tell me about Jaafar Jackson's latest movie.
+        Assistant: SEARCH_WEB: Jaafar Jackson latest movie release date
         
         Local Memory Context:
         ---
         {}
-        ---
-        
-        If the user asks for a character design (like Arcane style), expand the idea into a technical masterpiece prompt and use the GENERATE_IMAGE tool.",
+        ---",
         context
     );
 
@@ -57,20 +67,33 @@ async fn chat(
     let mut response = ollama::chat_stream(app.clone(), full_messages.clone(), &s.llm_model).await?;
 
     // 2. Check for SEARCH_WEB trigger
-    if let Some(caps) = regex::Regex::new(r"SEARCH_WEB:\s*(.*)").unwrap().captures(&response) {
+    let search_re = regex::Regex::new(r"(?i)SEARCH_WEB:\s*(.*)").unwrap();
+    if let Some(caps) = search_re.captures(&response) {
         let query = caps.get(1).map_or("", |m| m.as_str().trim());
-        if !query.is_empty() {
-            let _ = app.emit("llm-token", "\n\n*Searching the web...*\n\n");
-            let web_results = search::duckduckgo_search(query).await?;
+        if !query.is_empty() && !user_msg.contains("WEB SEARCH RESULTS:") {
+            // Signal search start and CLEAR the SEARCH_WEB command from UI
+            let _ = app.emit("llm-token", "CLEAR_AND_SEARCH");
             
-            // Add search result to history and re-prompt
-            full_messages.push(serde_json::json!({"role": "assistant", "content": response.clone()}));
-            full_messages.push(serde_json::json!({"role": "user", "content": format!("WEB SEARCH RESULTS:\n{}\n\nPlease provide a final answer based on these results.", web_results)}));
-            
-            // Second Pass (Final Answer)
-            response = ollama::chat_stream(app.clone(), full_messages, &s.llm_model).await?;
+            match search::duckduckgo_search(query).await {
+                Ok(web_results) => {
+                    let mut second_pass_messages = vec![serde_json::json!({"role": "system", "content": format!("{} \n\nIMPORTANT: Use the following WEB SEARCH RESULTS to answer accurately. Contradict yourself if needed.", system)})];
+                    second_pass_messages.extend(messages.clone());
+                    second_pass_messages.push(serde_json::json!({
+                        "role": "user", 
+                        "content": format!("WEB SEARCH RESULTS:\n---\n{}\n---\nPlease provide the final answer to: '{}'", web_results, user_msg)
+                    }));
+                    
+                    // Second Pass (Final Answer)
+                    response = ollama::chat_stream(app.clone(), second_pass_messages, &s.llm_model).await?;
+                },
+                Err(e) => {
+                    let _ = app.emit("llm-token", format!("\n\n*⚠️ Search failed: {}*\n\n", e));
+                }
+            }
         }
     }
+
+    let _ = app.emit("llm-done", &response);
 
     // Extraction as background task
     tokio::spawn(async move {
@@ -146,6 +169,10 @@ fn main() {
             roleplay::get_chat_history,
             roleplay::send_roleplay_message,
             roleplay::clear_roleplay_chat,
+
+            // Audio
+            audio::save_audio_temp,
+            audio::transcribe_audio,
 
             // OpenClaude (Coding AI)
             openclaude::start_openclaude,

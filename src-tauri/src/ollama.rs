@@ -74,7 +74,6 @@ pub async fn chat_stream(
         }
     }
 
-    let _ = app.emit("llm-done", &full);
     Ok(full)
 }
 

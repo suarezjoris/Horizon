@@ -19,7 +19,6 @@
 
     let term;
     let fitAddon;
-    let currentProjectPath = "/home/joris/Projects/Horizon";
 
     const pathDisplay = document.getElementById('oc-current-path');
     const changeDirBtn = document.getElementById('oc-change-dir-btn');
@@ -28,50 +27,20 @@
         console.log("[Aider] Initializing terminal...");
         const container = document.getElementById('oc-xterm-container');
         if (!container || term) return;
-
-        const LibTerminal = window.Terminal;
-        if (!LibTerminal) return;
-
-        term = new LibTerminal({
-            cursorBlink: true,
-            fontFamily: '"Courier New", monospace',
-            fontSize: 13,
-            theme: { background: '#000000', foreground: '#cccccc', cursor: '#7c3aed' }
-        });
-
-        if (window.FitAddon && window.FitAddon.FitAddon) {
-            fitAddon = new window.FitAddon.FitAddon();
-            term.loadAddon(fitAddon);
-        }
-
-        term.open(container);
-        if (fitAddon) fitAddon.fit();
-
-        term.onData(data => {
-            invoke('send_openclaude_raw', { data }).catch(e => console.error(e));
-        });
-
-        if (window.__TAURI__ && window.__TAURI__.event) {
-            window.__TAURI__.event.listen('openclaude-raw', (event) => {
-                term.write(event.payload);
-            });
-        }
-
-        window.addEventListener('resize', () => { if (fitAddon) fitAddon.fit(); });
-
-        startProcess();
-    }
-
+        
+        const currentPath = window.getCurrentProjectPath();
+        pathDisplay.textContent = `Project: ${currentPath.replace('/home/joris', '~')}`;
+...
     async function startProcess(newPath = null) {
         if (newPath) {
-            currentProjectPath = newPath;
-            pathDisplay.textContent = `Project: ${newPath.replace('/home/joris', '~')}`;
+            window.setCurrentProjectPath(newPath);
         }
         
-        term.writeln(`\x1b[1;34mStarting Aider in ${currentProjectPath}...\x1b[0m`);
+        const currentPath = window.getCurrentProjectPath();
+        term.writeln(`\x1b[1;34mStarting Aider in ${currentPath}...\x1b[0m`);
         
         try {
-            await invoke('start_openclaude', { projectPath: currentProjectPath });
+            await invoke('start_openclaude', { projectPath: currentPath });
         } catch (e) {
             term.writeln(`\x1b[1;31mStart Error: ${e}\x1b[0m`);
         }
