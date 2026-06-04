@@ -68,30 +68,35 @@ async fn chat(
     // 1. First Pass
     let mut response = ollama::chat_stream(app.clone(), full_messages.clone(), &s.llm_model).await?;
 
-    // 2. Check for SEARCH_WEB trigger
+    // 2. Check for triggers
     let search_re = regex::Regex::new(r"(?i)SEARCH_WEB:\s*(.*)").unwrap();
+    let image_re = regex::Regex::new(r"(?i)GENERATE_IMAGE:\s*(.*)").unwrap();
+
     if let Some(caps) = search_re.captures(&response) {
         let query = caps.get(1).map_or("", |m| m.as_str().trim());
         if !query.is_empty() && !user_msg.contains("WEB SEARCH RESULTS:") {
-            // Signal search start and CLEAR the SEARCH_WEB command from UI
             let _ = app.emit("llm-token", "CLEAR_AND_SEARCH");
-            
             match search::duckduckgo_search(query).await {
                 Ok(web_results) => {
-                    let mut second_pass_messages = vec![serde_json::json!({"role": "system", "content": format!("{} \n\nIMPORTANT: Use the following WEB SEARCH RESULTS to answer accurately. Contradict yourself if needed.", system)})];
+                    let mut second_pass_messages = vec![serde_json::json!({"role": "system", "content": format!("{} \n\nIMPORTANT: Use the following WEB SEARCH RESULTS to answer accurately.", system)})];
                     second_pass_messages.extend(messages.clone());
                     second_pass_messages.push(serde_json::json!({
                         "role": "user", 
                         "content": format!("WEB SEARCH RESULTS:\n---\n{}\n---\nPlease provide the final answer to: '{}'", web_results, user_msg)
                     }));
-                    
-                    // Second Pass (Final Answer)
                     response = ollama::chat_stream(app.clone(), second_pass_messages, &s.llm_model).await?;
                 },
                 Err(e) => {
                     let _ = app.emit("llm-token", format!("\n\n*⚠️ Search failed: {}*\n\n", e));
                 }
             }
+        }
+    } else if let Some(caps) = image_re.captures(&response) {
+        let prompt = caps.get(1).map_or("", |m| m.as_str().trim());
+        if !prompt.is_empty() {
+             let _ = app.emit("llm-token", format!("\n\n*🎨 Horizon is preparing to generate an image for:* **{}**\n\n*Switching to Image tab...*", prompt));
+             // The actual generation is still triggered by the user clicking the button in the image tab (as per security rules)
+             // But we ensure the backend doesn't hang and the message is properly terminated.
         }
     }
 
