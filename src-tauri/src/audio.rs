@@ -3,7 +3,7 @@ use tauri::AppHandle;
 use std::io::Write;
 
 #[tauri::command]
-pub async fn save_audio_temp(app: AppHandle, base64_data: String) -> Result<String, String> {
+pub async fn save_audio_temp(_app: AppHandle, base64_data: String) -> Result<String, String> {
     use base64::Engine;
     let data = base64::engine::general_purpose::STANDARD.decode(base64_data)
         .map_err(|e| format!("Base64 decode error: {}", e))?;

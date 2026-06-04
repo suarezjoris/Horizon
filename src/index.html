@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="libs/xterm.css">
   <script src="libs/xterm.js"></script>
   <script src="libs/xterm-addon-fit.js"></script>
+  <script src="libs/d3.min.js"></script>
   <script src="modules/diagnostic.js"></script>
 </head>
 <body>
@@ -33,6 +34,21 @@
   </div>
 </div>
 
+<!-- Onboarding / Calibration Overlay -->
+<div id="onboarding-overlay" class="hidden">
+  <div id="onboarding-box">
+    <div id="onboarding-header">
+      <div id="onboarding-logo">H</div>
+      <div id="onboarding-title">Initial Calibration</div>
+    </div>
+    <p id="onboarding-desc">Tell Horizon who you are. Your skills, your style, your dreams. This will form the core of your AI's personalized latent space.</p>
+    <textarea id="onboarding-input" placeholder="Example: I am a senior Rust developer who loves clean architecture and dark chocolate. I prefer concise answers and I am currently building a personal OS..."></textarea>
+    <div id="onboarding-footer">
+      <button id="submit-calibration-btn">Calibrate Horizon</button>
+    </div>
+  </div>
+</div>
+
 <div id="tab-bar">
   <div id="tab-inner">
     <div class="tab active" data-tab="llm">
@@ -43,9 +59,9 @@
       <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2.5"/><circle cx="8.5" cy="8.5" r="1.6"/><path d="M21 15l-5-5L5 21"/></svg>
       <span>Image</span>
     </div>
-    <div class="tab" data-tab="roleplay">
-      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5c4.5-1 9.5-1 14 0 0 7.5-3.1 13.5-7 13.5S5 12 5 4.5z"/><circle cx="9.4" cy="9.5" r="1"/><circle cx="14.6" cy="9.5" r="1"/><path d="M9 13.2c1.2 1.4 4.8 1.4 6 0"/></svg>
-      <span>Roleplay</span>
+    <div class="tab" data-tab="cinema">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
+      <span>Cinema</span>
     </div>
     <div class="tab" data-tab="notes">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M9 13h6M9 17h4"/></svg>
@@ -100,22 +116,51 @@
     </div>
   </div>
 
-  <!-- Roleplay Panel -->
-  <div class="panel" id="panel-roleplay">
-    <div id="rp-container">
-      <!-- Sidebar / Roster -->
-      <div id="rp-sidebar">
-        <button id="rp-import-btn">Import Card (.png)</button>
-        <div id="rp-roster"></div>
+  <!-- Cinema (Video) Panel -->
+  <div class="panel" id="panel-cinema">
+    <div id="cinema-container">
+      <div id="video-preview-area">
+        <video id="cinema-video" controls loop style="display: none;"></video>
+        <div id="video-placeholder">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          <span>Director's Cut Ready</span>
+        </div>
       </div>
-      
-      <!-- Chat Area -->
-      <div id="rp-chat-area">
-        <div id="rp-header">Select a character</div>
-        <div id="rp-chat-history"></div>
-        <div id="rp-input-area">
-          <textarea id="rp-input" rows="1" placeholder="Type your message..." disabled></textarea>
-          <button id="rp-send-btn" disabled>Send</button>
+
+      <div id="cinema-controls-area">
+        <div id="cinema-input-box">
+          <textarea id="video-prompt" placeholder="Describe the scene you want to animate..."></textarea>
+          
+          <div id="cinema-params">
+            <div class="param-row">
+              <label>Duration</label>
+              <input type="range" id="video-duration" min="2" max="8" step="1" value="4">
+              <span id="duration-val">4s</span>
+            </div>
+            <div class="param-row">
+              <label>Quality</label>
+              <select id="video-quality">
+                <option value="low">Low (Fast)</option>
+                <option value="mid" selected>Mid (Balanced)</option>
+                <option value="high">High (Quality)</option>
+              </select>
+            </div>
+            <div class="param-row">
+              <label>Input Image</label>
+              <button id="video-img-btn">🖼️ Pick Image (I2V)</button>
+              <span id="video-img-name" style="font-size: 10px; color: var(--text-dim);"></span>
+            </div>
+          </div>
+
+          <div id="cinema-status-box">
+             <div id="gpu-monitor">
+                <div id="gpu-bar"><div id="gpu-fill"></div></div>
+                <span id="gpu-text">GPU: --%</span>
+             </div>
+             <div id="time-est">Est: --:--</div>
+          </div>
+
+          <button id="generate-video-btn">🎬 Action!</button>
         </div>
       </div>
     </div>
@@ -132,7 +177,11 @@
         <div id="notes-list"></div>
       </div>
       <div id="notes-editor-area">
-        <input type="text" id="note-title" placeholder="Note Title...">
+        <div id="notes-editor-header">
+           <input type="text" id="note-title" placeholder="Note Title...">
+           <button id="toggle-mindmap-btn">Toggle Neural Field</button>
+        </div>
+        <div id="mindmap-container" class="hidden"></div>
         <textarea id="note-content" placeholder="Write your thoughts here..."></textarea>
         <div id="note-controls">
           <button id="save-note-btn">Save Note</button>
@@ -168,7 +217,10 @@
         <option value="rating_explicit">Explicit (NSFW)</option>
       </select>
     </div>
-    <button id="settings-save">Save</button>
+    <div id="settings-footer" style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+       <button id="reset-mem-btn" style="background: rgba(255,95,87,0.1); color: #ff5f57; border: 1px solid #ff5f57; padding: 10px 20px; border-radius: 15px; font-weight: 800; cursor: pointer;">Wipe Memory</button>
+       <button id="settings-save">Save</button>
+    </div>
   </div>
 </div>
 
@@ -177,9 +229,10 @@
 <script src="modules/diagnostic.js"></script>
 <script src="modules/llm.js"></script>
 <script src="modules/image.js"></script>
-<script src="modules/roleplay.js"></script>
+<script src="modules/cinema.js"></script>
 <script src="modules/openclaude.js"></script>
 <script src="modules/notes.js"></script>
+<script src="modules/onboarding.js"></script>
 <script src="main.js"></script>
 </body>
 </html>

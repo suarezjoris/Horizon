@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::AppHandle;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct HealthStatus {
@@ -95,6 +94,22 @@ async fn check_python_env() -> HealthStatus {
 }
 
 async fn check_comfyui() -> HealthStatus {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(500))
+        .build()
+        .unwrap_or_default();
+
+    let is_running = client.get("http://127.0.0.1:8188/").send().await.is_ok();
+
+    if is_running {
+        return HealthStatus {
+            name: "ComfyUI".to_string(),
+            status: true,
+            message: "ComfyUI server is online and responding.".to_string(),
+            fixable: false,
+        };
+    }
+
     let settings = crate::settings::load();
     let comfy_path = std::path::PathBuf::from(&settings.comfyui_path);
     let comfy_dir = comfy_path.parent().unwrap_or(&comfy_path);
@@ -108,21 +123,11 @@ async fn check_comfyui() -> HealthStatus {
         };
     }
 
-    let venv_path = comfy_dir.join("venv");
-    if !venv_path.exists() {
-        return HealthStatus {
-            name: "ComfyUI".to_string(),
-            status: false,
-            message: "ComfyUI virtual environment missing.".to_string(),
-            fixable: true,
-        };
-    }
-
     HealthStatus {
         name: "ComfyUI".to_string(),
-        status: true,
-        message: "ComfyUI detected and environment ready.".to_string(),
-        fixable: false,
+        status: false,
+        message: "ComfyUI is installed but OFFLINE. Click Fix to start it.".to_string(),
+        fixable: true,
     }
 }
 
@@ -235,7 +240,11 @@ pub async fn fix_health_issue(name: String) -> Result<String, String> {
                     let mut settings = crate::settings::load();
                     settings.comfyui_path = path.to_string_lossy().into_owned();
                     crate::settings::save_settings(settings)?;
-                    Ok(format!("ComfyUI found and reconnected at {}", path.display()))
+                    
+                    // Force spawn ComfyUI now that path is correct
+                    let _ = crate::comfyui::spawn_comfyui();
+                    
+                    Ok(format!("ComfyUI found, reconnected and STARTED at {}", path.display()))
                 }
                 None => Err("Could not find ComfyUI automatically. Please set path manually in settings.".into()),
             }

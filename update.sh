@@ -18,6 +18,7 @@ if [ -f "$CONFIG_FILE" ]; then
     # Force qwen2.5-coder:14b if it's still on old model
     sed -i 's/dolphin-mixtral:8x7b/qwen2.5-coder:14b/g' "$CONFIG_FILE"
     sed -i 's/dolphin-mixtral/qwen2.5-coder:14b/g' "$CONFIG_FILE"
+    sed -i 's/qwen2.5-coder:latest/qwen2.5-coder:14b/g' "$CONFIG_FILE"
 else
     echo "⚠️ Config missing! Creating default settings..."
     mkdir -p "$HOME/.config/horizon"

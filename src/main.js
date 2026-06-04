@@ -60,6 +60,18 @@ document.getElementById('settings-save').addEventListener('click', async () => {
   document.getElementById('settings-overlay').classList.remove('open');
 });
 
+document.getElementById('reset-mem-btn').addEventListener('click', async () => {
+  if (confirm("DANGEROUS: This will wipe all learned memories and knowledge about you. Are you sure?")) {
+    try {
+      const msg = await window.__TAURI__.core.invoke('reset_system');
+      alert(msg);
+      location.reload(); // Refresh app to trigger onboarding
+    } catch (err) {
+      alert("Reset failed: " + err);
+    }
+  }
+});
+
 document.querySelectorAll('.tab[data-tab]').forEach(tab => {
   tab.addEventListener('click', () => {
     if (!tab.classList.contains('disabled')) switchTab(tab.dataset.tab);

@@ -78,22 +78,64 @@ pub async fn get_context(query: &str) -> String {
     blocks.join("\n\n")
 }
 
+#[tauri::command]
+pub async fn process_calibration(text: String) -> Result<String, String> {
+    let s = settings::load();
+    let prompt = format!(
+        "You are the Core Archetype Weaver. Analyze this 'Initial Brain Dump' from the user and distribute its essence into 3 core files:
+        1. memory/user.md (Personal background, personality, values)
+        2. memory/code.md (Tech stack, coding style, architectural preferences)
+        3. memory/skills.md (Specific technical skills, masteries, or areas of expertise)
+
+        Rules:
+        - Be concise. Extract meaningful atomic facts.
+        - Output format: RAW JSON object with keys 'user', 'code', 'skills' (each value is a string with bullet points).
+
+        BRAIN DUMP:
+        {}",
+        text
+    );
+
+    let resp = ollama::chat_once(vec![serde_json::json!({"role": "user", "content": prompt})], &s.llm_model).await?;
+    
+    // Clean response
+    let json_str = resp.trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
+    let data: serde_json::Value = serde_json::from_str(json_str).map_err(|e| format!("Parsing Error: {}", e))?;
+
+    if let Some(user) = data["user"].as_str() {
+        let _ = vault::write_vault_note(&s.vault_path, "memory/user.md", &format!("# User Profile\n{}", user));
+    }
+    if let Some(code) = data["code"].as_str() {
+        let _ = vault::write_vault_note(&s.vault_path, "memory/code.md", &format!("# Code Preferences\n{}", code));
+    }
+    if let Some(skills) = data["skills"].as_str() {
+        let _ = vault::write_vault_note(&s.vault_path, "memory/skills.md", &format!("# Skills & Knowledge\n{}", skills));
+    }
+
+    Ok("Calibration complete. Neurons mapped.".to_string())
+}
+
 pub async fn extract_and_save(user_msg: String, ai_msg: String) {
     let s = settings::load();
     let prompt = format!(
-        "Act as a professional archiver. Analyze the exchange and extract ONLY permanent, verifiable facts about the user.
-        
+        "Act as a high-level cognitive archiver. Analyze this interaction to detect RECURRING patterns, STRONG preferences, or SPECIFIC working styles.
+
+        Focus on:
+        - Expressions like 'I love', 'I hate', 'I always', 'My style is'.
+        - Technical choices (e.g. 'I prefer Rust over C++').
+        - Personal identity markers.
+
         Rules:
-        1. NO conversational filler (e.g. 'I'm happy to help').
-        2. NO guesses or hallucinations.
-        3. Only save preferences, skills, or personal background.
-        4. Output format: RAW JSON array of objects.
+        1. Ignore transient questions or temporary tasks.
+        2. Only extract facts that define the user's permanent DNA.
+        3. Output format: RAW JSON array of objects.
         
         Exchange:
         User: {}
         AI: {}
         
-        Allowed files: memory/user.md, memory/code.md, memory/skills.md.",
+        Allowed files: memory/user.md, memory/code.md, memory/skills.md.
+        Format Example: [{{ \"file\": \"memory/code.md\", \"fact\": \"User prefers functional programming patterns in Rust.\" }}]",
         user_msg, ai_msg
     );
 

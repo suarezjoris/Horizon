@@ -54,8 +54,9 @@
                     btn.textContent = "Fixing...";
                     try {
                         const msg = await invoke('fix_health_issue', { name });
-                        alert(msg);
-                        runChecks(); // Re-run
+                        console.log("[Diagnostic] Fix successful:", msg);
+                        // Wait 8 seconds for server to bind port (CUDA can be slow)
+                        setTimeout(runChecks, 8000); 
                     } catch (e) {
                         alert("Fix failed: " + e);
                         btn.disabled = false;
