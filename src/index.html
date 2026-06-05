@@ -121,6 +121,7 @@
     <div id="cinema-container">
       <div id="video-preview-area">
         <video id="cinema-video" controls loop style="display: none;"></video>
+        <img id="cinema-poster" alt="render poster" style="display: none;">
         <div id="video-placeholder">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
           <span>Director's Cut Ready</span>
@@ -162,6 +163,11 @@
 
           <button id="generate-video-btn">🎬 Action!</button>
         </div>
+      </div>
+
+      <div id="cinema-gallery-header">Past Renders</div>
+      <div id="video-gallery">
+        <!-- Video items injected here -->
       </div>
     </div>
   </div>

@@ -111,7 +111,8 @@ body::before {
     radial-gradient(42% 42% at 84% 78%, rgba(0, 242, 255, 0.085), transparent 60%),
     radial-gradient(34% 34% at 72% 14%, rgba(184, 115, 51, 0.10), transparent 60%);
   filter: blur(28px);
-  animation: aurora 34s ease-in-out infinite alternate;
+  /* animation disabled: animating a full-screen blur pegs WebKitGTK's CPU
+     renderer on Linux/NVIDIA (no GPU compositing). Static gradient is identical at rest. */
 }
 
 /* Floating dust motes — faint clockwork particles rising */
@@ -128,7 +129,7 @@ body::after {
     radial-gradient(circle, rgba(255, 255, 255, 0.45) 0, transparent 1.1px);
   background-size: 220px 220px, 340px 340px, 160px 160px;
   background-position: 0 0, 60px 90px, 130px 40px;
-  animation: motes 48s linear infinite;
+  /* animation disabled: full-viewport repaint every frame on the CPU renderer. */
 }
 
 @keyframes aurora {
@@ -226,7 +227,7 @@ body::after {
   border-radius: 50%;
   transition: color 0.4s, background 0.3s, box-shadow 0.3s;
 }
-#settings-btn svg { width: 22px; height: 22px; stroke: currentColor; animation: spin 30s linear infinite; }
+#settings-btn svg { width: 22px; height: 22px; stroke: currentColor; }
 #settings-btn:hover { color: var(--accent-gold-strong); background: rgba(212, 175, 55, 0.08); box-shadow: 0 0 18px var(--accent-glow); }
 #settings-btn:hover svg { animation-duration: 4s; }
 
@@ -535,7 +536,7 @@ body::after {
   border-radius: var(--radius-md); box-shadow: 0 20px 44px rgba(0, 0, 0, 0.8);
 }
 
-#gallery-header {
+#gallery-header, #cinema-gallery-header {
   font-family: var(--font-display);
   font-size: 24px; font-weight: 700; color: var(--accent-gold-strong); margin-top: 8px; letter-spacing: 1.5px;
   text-shadow: 0 0 22px var(--accent-glow);
@@ -558,6 +559,25 @@ body::after {
 .gallery-item img { border-radius: var(--radius-md); width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
 .gallery-item-info { padding: 12px 8px 4px 8px; font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+#video-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 18px; margin-top: 4px; padding-bottom: 12px; }
+.vid-thumb { position: relative; cursor: pointer; border-radius: var(--radius-md); overflow: hidden; }
+.vid-thumb img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
+.vid-thumb.no-thumb { aspect-ratio: 1; background: #0b0e14; }
+.vid-thumb .play-badge {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2;
+  width: 52px; height: 52px; border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(4px);
+  border: 1px solid rgba(212, 175, 55, 0.5);
+  display: flex; align-items: center; justify-content: center; pointer-events: none;
+  transition: transform 0.3s var(--ease-spring);
+}
+.vid-thumb .play-badge::before {
+  content: ''; width: 0; height: 0; margin-left: 4px;
+  border-top: 10px solid transparent; border-bottom: 10px solid transparent;
+  border-left: 17px solid var(--accent-gold-strong);
+}
+.gallery-item:hover .play-badge { transform: translate(-50%, -50%) scale(1.12); }
+
 .delete-btn {
   position: absolute; top: 20px; right: 20px; z-index: 3;
   background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(4px);
@@ -578,10 +598,10 @@ body::after {
 /* ========================================================================
    7. CINEMA (Video Generator)
    ======================================================================== */
-#panel-cinema { display: none !important; }
+#panel-cinema { display: none !important; overflow-y: auto; scrollbar-gutter: stable; }
 #panel-cinema.active { display: flex !important; }
 
-#cinema-container { display: flex; flex-direction: column; gap: 32px; height: 100%; }
+#cinema-container { display: flex; flex-direction: column; gap: 32px; min-height: 100%; flex-shrink: 0; }
 
 #video-preview-area {
   flex: 1; min-height: 300px;
@@ -594,6 +614,7 @@ body::after {
 }
 
 #cinema-video { width: 100%; height: 100%; object-fit: contain; border-radius: inherit; }
+#cinema-poster { width: 100%; height: 100%; object-fit: contain; border-radius: inherit; cursor: pointer; }
 
 #video-placeholder {
   display: flex; flex-direction: column; align-items: center; gap: 18px;

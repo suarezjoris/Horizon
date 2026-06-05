@@ -10,8 +10,17 @@
     const videoImgName = document.getElementById('video-img-name');
     const generateBtn = document.getElementById('generate-video-btn');
     const cinemaVideo = document.getElementById('cinema-video');
+    const cinemaPoster = document.getElementById('cinema-poster');
     const videoPlaceholder = document.getElementById('video-placeholder');
-    
+    const videoGallery = document.getElementById('video-gallery');
+
+    const assetUrl = (path) => {
+        const t = window.__TAURI__;
+        if (path.startsWith('http')) return path;
+        if (t && t.core && t.core.convertFileSrc) return t.core.convertFileSrc(path);
+        return path;
+    };
+
     const gpuFill = document.getElementById('gpu-fill');
     const gpuText = document.getElementById('gpu-text');
     const timeEst = document.getElementById('time-est');
@@ -76,9 +85,22 @@
 
         generateBtn.disabled = true;
         generateBtn.textContent = "🎥 Shooting...";
-        videoPlaceholder.querySelector('span').textContent = "Developing Film...";
 
         try {
+            // Start ComfyUI on demand (it stays off when idle), then wait until it's ready.
+            const isRunning = await invoke('check_comfyui');
+            if (!isRunning) {
+                videoPlaceholder.querySelector('span').textContent = "Starting ComfyUI...";
+                await invoke('spawn_comfyui');
+                let ready = false;
+                for (let i = 0; i < 45; i++) {
+                    await new Promise(r => setTimeout(r, 2000));
+                    if (await invoke('check_comfyui')) { ready = true; break; }
+                }
+                if (!ready) throw "ComfyUI failed to start within 90s.";
+            }
+            videoPlaceholder.querySelector('span').textContent = "Developing Film...";
+
             const resultPath = await invoke('generate_video', {
                 prompt,
                 duration: parseInt(videoDuration.value),
@@ -87,12 +109,10 @@
             });
 
             console.log("[Cinema] Video ready:", resultPath);
-            
-            // Show video (assuming the backend returns a URL or we use asset://)
-            cinemaVideo.src = resultPath.startsWith('http') ? resultPath : `asset://localhost${resultPath}`;
-            cinemaVideo.style.display = 'block';
-            videoPlaceholder.style.display = 'none';
-            
+
+            playVideo(resultPath, resultPath.replace(/\.mp4$/i, '.png'));
+            loadVideoGallery();
+
             alert("Director's Cut Ready!");
         } catch (e) {
             alert("Production Error: " + e);
@@ -104,6 +124,62 @@
     }
 
     generateBtn.onclick = generate;
+
+    function openExternally(videoPath) {
+        invoke('open_video', { path: videoPath }).catch(err => alert('Could not open video: ' + err));
+    }
+
+    // WebKitGTK can't render <video> reliably on Linux/NVIDIA, so play in the system
+    // player and show the poster frame (the VHS .png) in the preview pane.
+    function playVideo(videoPath, thumbPath) {
+        if (thumbPath) {
+            cinemaPoster.src = assetUrl(thumbPath);
+            cinemaPoster.style.display = 'block';
+        }
+        cinemaVideo.style.display = 'none';
+        videoPlaceholder.style.display = 'none';
+        cinemaPoster.onclick = () => openExternally(videoPath);
+        openExternally(videoPath);
+    }
+
+    async function loadVideoGallery() {
+        if (!videoGallery) return;
+        try {
+            const videos = await invoke('list_videos');
+            videoGallery.innerHTML = '';
+            if (!videos.length) {
+                videoGallery.innerHTML = '<div style="color: var(--text-dim); font-size: 13px; padding: 8px;">No renders yet. Hit Action! to create one.</div>';
+                return;
+            }
+            videos.forEach(v => {
+                const item = document.createElement('div');
+                item.className = 'gallery-item';
+                item.innerHTML = `
+                    <div class="vid-thumb${v.thumb ? '' : ' no-thumb'}">
+                        <img alt="render">
+                        <div class="play-badge"></div>
+                    </div>
+                    <div class="gallery-item-info"></div>
+                    <button class="delete-btn" title="Delete video">🗑️</button>
+                `;
+                if (v.thumb) item.querySelector('img').src = assetUrl(v.thumb);
+                item.querySelector('.gallery-item-info').textContent = v.date || v.name;
+                item.querySelector('.vid-thumb').onclick = () => playVideo(v.path, v.thumb);
+                item.querySelector('.delete-btn').onclick = async (e) => {
+                    e.stopPropagation();
+                    if (confirm('Delete this video?')) {
+                        try { await invoke('delete_video', { path: v.path }); loadVideoGallery(); }
+                        catch (err) { alert('Delete failed: ' + err); }
+                    }
+                };
+                videoGallery.appendChild(item);
+            });
+        } catch (e) {
+            console.error('[Cinema] gallery load failed', e);
+        }
+    }
+
+    loadVideoGallery();
 
     // Triggered by LLM
     listen('llm-done', (event) => {

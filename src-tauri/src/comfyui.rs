@@ -25,7 +25,16 @@ pub async fn check_comfyui() -> bool {
 pub fn spawn_comfyui() -> Result<(), String> {
     let s = settings::load();
     
-    // Security Fix: Canonicalize and validate path
+    // Check if ComfyUI is already running on 8188
+    let client = std::net::TcpStream::connect_timeout(
+        &"127.0.0.1:8188".parse().unwrap(),
+        std::time::Duration::from_millis(100)
+    );
+    if client.is_ok() {
+        println!("ComfyUI: Port 8188 active, skipping spawn.");
+        return Ok(());
+    }
+
     let path = std::fs::canonicalize(&s.comfyui_path)
         .map_err(|_| format!("Invalid ComfyUI path: {}", s.comfyui_path))?;
 

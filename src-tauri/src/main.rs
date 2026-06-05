@@ -21,10 +21,20 @@ use tauri::Emitter;
 async fn chat(
     app: tauri::AppHandle,
     messages: Vec<serde_json::Value>,
-    context: String,
-    user_msg: String,
 ) -> Result<(), String> {
     let s = settings::load();
+
+    // The frontend sends only `messages`; derive what the flow needs from it.
+    // Latest user message — used by the web-search guard, the 2nd-pass prompt, and memory extraction.
+    let user_msg = messages
+        .iter()
+        .rev()
+        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+        .and_then(|m| m.get("content").and_then(|c| c.as_str()))
+        .unwrap_or("")
+        .to_string();
+    // RAG memory context isn't wired through the frontend yet; keep it empty.
+    let context = String::new();
 
     // 0. Construct System Prompt
     let system = format!(
@@ -150,6 +160,12 @@ async fn search_vault(query: String) -> Result<Vec<String>, String> {
 }
 
 fn main() {
+    // WebKitGTK on Linux/NVIDIA stalls repaints (the UI only updates on window
+    // events, scrolling lags) with the DMABUF renderer. Disable it before the
+    // webview initializes for a smooth UI. Linux-only; does not affect Windows.
+    #[cfg(target_os = "linux")]
+    std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
@@ -165,6 +181,7 @@ fn main() {
             vault::write_note,
             embeddings::reindex,
             search_vault,
+            file_reader::read_file_content,
             comfyui::check_comfyui,
             comfyui::spawn_comfyui,
             comfyui::generate_image,
@@ -173,6 +190,9 @@ fn main() {
             image_store::delete_image,
             cinema::get_gpu_stats,
             cinema::generate_video,
+            cinema::list_videos,
+            cinema::delete_video,
+            cinema::open_video,
             audio::save_audio_temp,
             audio::transcribe_audio,
             diagnostic::run_diagnostics,

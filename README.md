@@ -6,7 +6,7 @@
 <br>
 *Built with Rust, Tauri v2, Vanilla JS, Ollama, and ComfyUI.*
 
-[![Version](https://img.shields.io/badge/version-v2.05-d4af37.svg)](https://github.com/suarezjoris/Horizon/releases)
+[![Version](https://img.shields.io/badge/version-v2.0.5-d4af37.svg)](https://github.com/suarezjoris/Horizon/releases)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-00f2ff.svg)]()
 [![Rust](https://img.shields.io/badge/rust-backend-orange.svg)]()
 
@@ -18,13 +18,14 @@
 
 Horizon is a private, locally-hosted AI ecosystem designed to be the ultimate digital companion. Moving away from cloud-dependent services, Horizon runs entirely on your hardware, ensuring absolute privacy and uncensored interactions. 
 
-Wrapped in a custom **Hextech / Arcane** aesthetic (Dark Glassmorphism, Cinzel typography, and Clockwork motion), Horizon integrates advanced text generation, image creation, roleplaying, and knowledge management into a single, seamless native desktop application.
+Wrapped in a custom **Hextech / Arcane** aesthetic (Dark Glassmorphism, Cinzel typography, and Clockwork motion), Horizon integrates advanced text generation, image creation, video generation, roleplaying, and knowledge management into a single, seamless native desktop application.
 
 ## ✨ Core Features
 
 - **💬 Intelligent LLM Chat**: Powered by `qwen2.5-coder:14b` (via Ollama). Horizon can reason, code, and chat fluidly.
 - **🌐 Autonomous Web Search**: If Horizon doesn't know a fact, it automatically triggers a Python-based DuckDuckGo search to verify information before answering.
 - **🖼️ Image Generation**: Deep integration with **ComfyUI**. Generate stunning images using SDXL/Pony models directly from the chat or the dedicated Image tab.
+- **🎬 Cinema (Video Generation)**: Text-to-video and image-to-video via **ComfyUI + Wan 2.2** (WanVideoWrapper). Renders animated clips with a "Past Renders" gallery and plays them in your system player. *Linux + CUDA GPU; block-swap lets the 14B model run on 12 GB VRAM (image-to-video gives the best results).*
 - **🎭 Character Roleplay**: Import TavernAI PNG character cards and roleplay with local LLMs.
 - **📝 Obsidian-Style Notes**: A built-in markdown editor and Vault system to manage your personal knowledge base.
 - **🎤 Audio Import**: Speak directly to Horizon using the integrated microphone interface, powered by local **Faster-Whisper** transcription.
@@ -70,7 +71,7 @@ Horizon is built for performance and absolute local control:
 
 3. **Launch** "Horizon" from the Start Menu (make sure Ollama is running).
 
-   > **Note:** Chat, Roleplay, Notes, Web Search, Audio and Image Generation work on Windows. The **Code tab (Aider) is not yet available on Windows.**
+   > **Note:** Chat, Roleplay, Notes, Web Search, Audio and Image Generation work on Windows. The **Code tab (Aider)** and **Cinema (video generation)** are Linux-only for now.
 
 ## 🛡️ Diagnostics & Auto-Repair
 
