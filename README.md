@@ -6,7 +6,7 @@
 <br>
 *Built with Rust, Tauri v2, Vanilla JS, Ollama, and ComfyUI.*
 
-[![Version](https://img.shields.io/badge/version-v2.0.5-d4af37.svg)](https://github.com/suarezjoris/Horizon/releases)
+[![Version](https://img.shields.io/badge/version-v2.1.0-d4af37.svg)](https://github.com/suarezjoris/Horizon/releases)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-00f2ff.svg)]()
 [![Rust](https://img.shields.io/badge/rust-backend-orange.svg)]()
 

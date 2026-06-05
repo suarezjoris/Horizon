@@ -1,6 +1,6 @@
 {
   "productName": "Horizon",
-  "version": "2.0.5",
+  "version": "2.1.0",
   "identifier": "com.horizon.app",
   "build": {
     "frontendDist": "../src"
