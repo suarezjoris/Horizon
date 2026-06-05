@@ -13,6 +13,12 @@
     const cinemaPoster = document.getElementById('cinema-poster');
     const videoPlaceholder = document.getElementById('video-placeholder');
     const videoGallery = document.getElementById('video-gallery');
+    const videoResolution = document.getElementById('video-resolution');
+    const videoFps = document.getElementById('video-fps');
+    const fpsVal = document.getElementById('fps-val');
+    const videoSeed = document.getElementById('video-seed');
+    const videoSeedDice = document.getElementById('video-seed-dice');
+    const cancelBtn = document.getElementById('cancel-video-btn');
 
     const assetUrl = (path) => {
         const t = window.__TAURI__;
@@ -26,11 +32,25 @@
     const timeEst = document.getElementById('time-est');
 
     let selectedImagePath = null;
+    let cancelled = false;
 
     // Update duration display
     videoDuration.oninput = () => {
         durationVal.textContent = videoDuration.value + 's';
         updateEstimation();
+    };
+
+    // FPS display
+    videoFps.oninput = () => { fpsVal.textContent = videoFps.value; };
+
+    // Randomize seed (visible so a good one can be reused)
+    videoSeedDice.onclick = () => { videoSeed.value = Math.floor(Math.random() * 2147483647); };
+
+    // Cancel an in-progress render
+    cancelBtn.onclick = () => {
+        cancelled = true;
+        cancelBtn.textContent = "Cancelling…";
+        invoke('interrupt_comfyui').catch(() => {});
     };
 
     // Image Picker for I2V
@@ -83,8 +103,11 @@
         const prompt = videoPrompt.value.trim();
         if (!prompt && !selectedImagePath) return alert("Please enter a prompt or select an image.");
 
+        cancelled = false;
         generateBtn.disabled = true;
         generateBtn.textContent = "🎥 Shooting...";
+        cancelBtn.style.display = 'block';
+        cancelBtn.textContent = "✖ Cancel render";
 
         try {
             // Start ComfyUI on demand (it stays off when idle), then wait until it's ready.
@@ -101,11 +124,17 @@
             }
             videoPlaceholder.querySelector('span').textContent = "Developing Film...";
 
+            const res = parseInt(videoResolution.value);
+            const seedStr = videoSeed.value.trim();
             const resultPath = await invoke('generate_video', {
                 prompt,
                 duration: parseInt(videoDuration.value),
                 quality: videoQuality.value,
-                imagePath: selectedImagePath
+                imagePath: selectedImagePath,
+                width: res,
+                height: res,
+                fps: parseInt(videoFps.value),
+                seed: seedStr === '' ? null : parseInt(seedStr)
             });
 
             console.log("[Cinema] Video ready:", resultPath);
@@ -115,11 +144,16 @@
 
             alert("Director's Cut Ready!");
         } catch (e) {
-            alert("Production Error: " + e);
+            if (cancelled) {
+                videoPlaceholder.querySelector('span').textContent = "Render cancelled";
+            } else {
+                alert("Production Error: " + e);
+            }
         } finally {
             generateBtn.disabled = false;
             generateBtn.textContent = "🎬 Action!";
-            videoPlaceholder.querySelector('span').textContent = "Director's Cut Ready";
+            cancelBtn.style.display = 'none';
+            if (!cancelled) videoPlaceholder.querySelector('span').textContent = "Director's Cut Ready";
         }
     }
 

@@ -10,9 +10,21 @@ echo "🔍 Starting Horizon Deep Maintenance..."
 # 1. Check Git Updates
 if [ -d ".git" ]; then
     echo "📦 Checking for updates..."
-    git stash push -m "Horizon Auto-Update Stash" > /dev/null 2>&1
+    # Only stash if there are local changes, so we never pop an unrelated stash.
+    STASHED=0
+    if ! git diff --quiet || ! git diff --cached --quiet; then
+        git stash push -m "Horizon Auto-Update Stash" > /dev/null 2>&1 && STASHED=1
+    fi
     git pull origin main --rebase || echo "⚠️ Offline, skipping pull."
-    git stash pop > /dev/null 2>&1 || true
+    # Restore local changes. If pop conflicts, FAIL LOUDLY instead of silently
+    # dropping the work into the stash (this is what caused lost edits before).
+    if [ "$STASHED" = "1" ]; then
+        if ! git stash pop; then
+            echo "❌ 'git stash pop' failed — your local changes are SAFE in 'git stash list'."
+            echo "   Resolve the conflict manually, then re-run ./update.sh. Aborting."
+            exit 1
+        fi
+    fi
 fi
 
 # 2. Fix ComfyUI Dependencies

@@ -33,8 +33,26 @@ async fn chat(
         .and_then(|m| m.get("content").and_then(|c| c.as_str()))
         .unwrap_or("")
         .to_string();
-    // RAG memory context isn't wired through the frontend yet; keep it empty.
-    let context = String::new();
+    // RAG: pull the most relevant vault chunks for this message (best-effort —
+    // any failure or empty index just yields no context, chat still works).
+    let context = {
+        let index = embeddings::load_index(&s.embeddings_path);
+        if index.is_empty() || user_msg.is_empty() {
+            String::new()
+        } else {
+            match ollama::embed(vec![user_msg.clone()], "nomic-embed-text:latest").await {
+                Ok(vecs) => match vecs.into_iter().next() {
+                    Some(qvec) => embeddings::search(&index, &qvec, 3)
+                        .iter()
+                        .map(|e| format!("[{}]\n{}", e.path, &e.chunk[..e.chunk.len().min(400)]))
+                        .collect::<Vec<_>>()
+                        .join("\n\n"),
+                    None => String::new(),
+                },
+                Err(_) => String::new(),
+            }
+        }
+    };
 
     // 0. Construct System Prompt
     let system = format!(
@@ -184,6 +202,8 @@ fn main() {
             file_reader::read_file_content,
             comfyui::check_comfyui,
             comfyui::spawn_comfyui,
+            comfyui::free_comfyui,
+            comfyui::interrupt_comfyui,
             comfyui::generate_image,
             image_store::save_generated_image,
             image_store::list_gallery,

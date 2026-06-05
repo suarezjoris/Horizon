@@ -8,6 +8,9 @@ struct ChatRequest {
     model: String,
     messages: Vec<serde_json::Value>,
     stream: bool,
+    // Guarantee the model unloads from VRAM after idle, even if a global
+    // OLLAMA_KEEP_ALIVE is set long/infinite. Frees ~VRAM when not chatting.
+    keep_alive: String,
 }
 
 #[derive(Deserialize)]
@@ -46,6 +49,7 @@ pub async fn chat_stream(
             model: model.to_string(),
             messages,
             stream: true,
+            keep_alive: "5m".to_string(),
         })
         .send()
         .await

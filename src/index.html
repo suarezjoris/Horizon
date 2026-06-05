@@ -151,6 +151,24 @@
               <button id="video-img-btn">🖼️ Pick Image (I2V)</button>
               <span id="video-img-name" style="font-size: 10px; color: var(--text-dim);"></span>
             </div>
+            <div class="param-row">
+              <label>Resolution</label>
+              <select id="video-resolution">
+                <option value="480">480² (fast / low VRAM)</option>
+                <option value="640" selected>640² (balanced)</option>
+                <option value="720">720² (quality / slow)</option>
+              </select>
+            </div>
+            <div class="param-row">
+              <label>FPS</label>
+              <input type="range" id="video-fps" min="8" max="24" step="1" value="16">
+              <span id="fps-val">16</span>
+            </div>
+            <div class="param-row">
+              <label>Seed</label>
+              <input type="number" id="video-seed" placeholder="random" style="flex:1; min-width:0;">
+              <button id="video-seed-dice" title="Randomize seed">🎲</button>
+            </div>
           </div>
 
           <div id="cinema-status-box">
@@ -162,6 +180,7 @@
           </div>
 
           <button id="generate-video-btn">🎬 Action!</button>
+          <button id="cancel-video-btn" style="display:none;">✖ Cancel render</button>
         </div>
       </div>
 

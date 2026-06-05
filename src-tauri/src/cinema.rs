@@ -39,7 +39,11 @@ pub async fn generate_video(
     prompt: String,
     duration: i32,
     quality: String,
-    image_path: Option<String>
+    image_path: Option<String>,
+    width: i64,
+    height: i64,
+    fps: i64,
+    seed: Option<i64>,
 ) -> Result<String, String> {
     let s = settings::load();
     
@@ -59,13 +63,14 @@ pub async fn generate_video(
     let mut workflow: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
 
     // 3. Inject Parameters into native WanVideoWrapper nodes
-    let seed = chrono::Utc::now().timestamp_millis() as u64;
+    let seed = seed.unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
     let steps = match quality.as_str() {
         "low" => 20,
         "mid" => 30,
         "high" => 50,
         _ => 30,
     };
+    let frames = (duration as i64 * fps).clamp(8, 120);
 
     if let Some(nodes) = workflow.as_object_mut() {
         for (id, node) in nodes.iter_mut() {
@@ -86,13 +91,25 @@ pub async fn generate_video(
                 }
             }
 
-            // Dimension/Length setup (Node 5)
+            // Dimensions / length (Node 5)
             if current_id == "5" {
                 if let Some(inputs) = node["inputs"].as_object_mut() {
-                    let frames = (duration * 16).min(120);
                     if inputs.contains_key("num_frames") {
                         inputs["num_frames"] = serde_json::json!(frames);
                     }
+                    if inputs.contains_key("width") {
+                        inputs["width"] = serde_json::json!(width);
+                    }
+                    if inputs.contains_key("height") {
+                        inputs["height"] = serde_json::json!(height);
+                    }
+                }
+            }
+
+            // Output frame rate (Node 8 = VHS_VideoCombine)
+            if current_id == "8" {
+                if let Some(inputs) = node["inputs"].as_object_mut() {
+                    inputs["frame_rate"] = serde_json::json!(fps);
                 }
             }
 

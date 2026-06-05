@@ -2,6 +2,12 @@ let activeTab = 'llm';
 let currentProjectPath = "/home/joris/Projects/Horizon";
 
 function switchTab(name) {
+  // Free ComfyUI models when leaving a generation tab (resource economy) — keeps
+  // the model loaded while you iterate in-tab, releases RAM/VRAM once you leave.
+  if ((activeTab === 'image' || activeTab === 'cinema') && activeTab !== name) {
+    window.__TAURI__?.core?.invoke('free_comfyui').catch(() => {});
+  }
+
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === `panel-${name}`));
   activeTab = name;

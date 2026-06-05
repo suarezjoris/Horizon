@@ -75,6 +75,32 @@ pub fn spawn_comfyui() -> Result<(), String> {
     Ok(())
 }
 
+/// Unload ComfyUI models and free its RAM/VRAM (keeps the server running).
+/// Called when leaving a generation tab so idle sessions don't hold the model.
+#[tauri::command]
+pub async fn free_comfyui() -> Result<(), String> {
+    let client = Client::new();
+    let _ = client
+        .post("http://127.0.0.1:8188/free")
+        .json(&serde_json::json!({"unload_models": true, "free_memory": true}))
+        .send()
+        .await;
+    Ok(())
+}
+
+/// Abort the in-progress render and clear the queue (Cancel button).
+#[tauri::command]
+pub async fn interrupt_comfyui() -> Result<(), String> {
+    let client = Client::new();
+    let _ = client.post("http://127.0.0.1:8188/interrupt").send().await;
+    let _ = client
+        .post("http://127.0.0.1:8188/queue")
+        .json(&serde_json::json!({"clear": true}))
+        .send()
+        .await;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn generate_image(prompt: String) -> Result<Vec<u8>, String> {
     let s = settings::load();
