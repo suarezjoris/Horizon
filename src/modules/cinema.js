@@ -53,6 +53,14 @@
         invoke('interrupt_comfyui').catch(() => {});
     };
 
+    // Live render progress from the ComfyUI websocket (Step value/max)
+    listen('video-progress', (e) => {
+        const { value, max } = e.payload || {};
+        if (max > 0 && generateBtn.disabled && !cancelled) {
+            videoPlaceholder.querySelector('span').textContent = `Rendering ${value}/${max}`;
+        }
+    });
+
     // Image Picker for I2V
     videoImgBtn.onclick = async () => {
         try {

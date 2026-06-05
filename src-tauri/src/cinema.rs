@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 use crate::settings;
+use tauri::Emitter;
+use futures_util::StreamExt;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GpuStats {
@@ -36,6 +38,7 @@ pub async fn get_gpu_stats() -> Result<GpuStats, String> {
 
 #[tauri::command]
 pub async fn generate_video(
+    app: tauri::AppHandle,
     prompt: String,
     duration: i32,
     quality: String,
@@ -124,11 +127,43 @@ pub async fn generate_video(
         }
     }
 
+    // 3b. Live progress: open a websocket with our client_id BEFORE submitting,
+    // and emit "video-progress" {value,max} events to the UI. Self-terminates
+    // when ComfyUI signals execution finished (executing -> node: null).
+    let client_id = format!("horizon-{}", chrono::Utc::now().timestamp_millis());
+    {
+        let ws_app = app.clone();
+        let ws_client_id = client_id.clone();
+        tokio::spawn(async move {
+            let url = format!("ws://127.0.0.1:8188/ws?clientId={}", ws_client_id);
+            if let Ok((mut ws, _)) = tokio_tungstenite::connect_async(url).await {
+                while let Some(Ok(msg)) = ws.next().await {
+                    if let tokio_tungstenite::tungstenite::Message::Text(txt) = msg {
+                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
+                            match v["type"].as_str() {
+                                Some("progress") => {
+                                    let value = v["data"]["value"].as_i64().unwrap_or(0);
+                                    let max = v["data"]["max"].as_i64().unwrap_or(0);
+                                    let _ = ws_app.emit(
+                                        "video-progress",
+                                        serde_json::json!({ "value": value, "max": max }),
+                                    );
+                                }
+                                Some("executing") if v["data"]["node"].is_null() => break,
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     // 4. Submit
     let client = reqwest::Client::new();
     let resp = client
         .post("http://127.0.0.1:8188/prompt")
-        .json(&serde_json::json!({ "prompt": workflow }))
+        .json(&serde_json::json!({ "prompt": workflow, "client_id": client_id }))
         .send()
         .await
         .map_err(|e| format!("ComfyUI offline: {}", e))?;
