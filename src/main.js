@@ -79,6 +79,27 @@ document.getElementById('help-overlay').addEventListener('click', (e) => {
   if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
 });
 
+// Persona Crafter Logic
+document.getElementById('pc-save-btn').addEventListener('click', async () => {
+  const name = document.getElementById('pc-name').value.trim();
+  const prompt = document.getElementById('pc-prompt').value.trim();
+  
+  if (!name || !prompt) return alert("Please enter both a name and a system prompt.");
+  
+  try {
+    const relPath = `characters/${name}.md`;
+    await window.__TAURI__.core.invoke('write_note', { relPath, content: prompt });
+    alert(`Persona '${name}' saved successfully!`);
+    document.getElementById('pc-name').value = '';
+    document.getElementById('pc-prompt').value = '';
+    
+    // Refresh the selectors in the chat bar
+    if (window.refreshSelectors) await window.refreshSelectors();
+  } catch (err) {
+    alert("Failed to save persona: " + err);
+  }
+});
+
 document.getElementById('reset-mem-btn').addEventListener('click', async () => {
   if (confirm("DANGEROUS: This will wipe all learned memories and knowledge about you. Are you sure?")) {
     try {

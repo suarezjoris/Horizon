@@ -4,11 +4,39 @@ const { listen } = window.__TAURI__.event;
 const history = document.getElementById('chat-history');
 const input = document.getElementById('chat-input');
 const sendBtn = document.getElementById('send-btn');
+const modelSelect = document.getElementById('model-select');
+const personaSelect = document.getElementById('persona-select');
 
 let messages = [];
 let streamingBubble = null;
 let unlistenToken = null;
 let unlistenDone = null;
+
+async function refreshSelectors() {
+    try {
+        const models = await invoke('list_ollama_models');
+        modelSelect.innerHTML = '<option value="">Default Model</option>';
+        models.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.textContent = m;
+            modelSelect.appendChild(opt);
+        });
+
+        const personas = await invoke('list_personas');
+        personaSelect.innerHTML = '<option value="">🎭 Horizon</option>';
+        personas.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p;
+            opt.textContent = `🎭 ${p}`;
+            personaSelect.appendChild(opt);
+        });
+    } catch (e) {
+        console.error("Failed to refresh selectors", e);
+    }
+}
+window.refreshSelectors = refreshSelectors;
+refreshSelectors();
 
 function addBubble(role, text) {
   const row = document.createElement('div');
@@ -250,7 +278,9 @@ async function send() {
   try {
     // SCALE-001 Fix: Limit context window to last 15 messages
     const trimmedMessages = messages.slice(-15);
-    await invoke('chat', { messages: trimmedMessages });
+    const model = modelSelect.value || null;
+    const persona = personaSelect.value || null;
+    await invoke('chat', { messages: trimmedMessages, model, persona });
   } catch (err) {
     streamingBubble.textContent = `Error: ${err}`;
     streamingBubble.classList.remove('streaming');

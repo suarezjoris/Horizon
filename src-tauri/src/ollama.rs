@@ -141,6 +141,29 @@ pub async fn describe_image(base64_image: &str) -> Result<String, String> {
     Ok(json_resp["response"].as_str().unwrap_or("No description provided.").to_string())
 }
 
+#[derive(Deserialize)]
+struct ModelList {
+    models: Vec<Model>,
+}
+
+#[derive(Deserialize)]
+struct Model {
+    name: String,
+}
+
+pub async fn list_models() -> Result<Vec<String>, String> {
+    let client = Client::new();
+    let resp: ModelList = client
+        .get("http://localhost:11434/api/tags")
+        .send()
+        .await
+        .map_err(|e| format!("Ollama unreachable: {e}"))?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(resp.models.into_iter().map(|m| m.name).collect())
+}
+
 /// Unload the active model from VRAM (sets keep_alive to 0).
 pub async fn unload(model: &str) -> Result<(), String> {
     let client = Client::new();

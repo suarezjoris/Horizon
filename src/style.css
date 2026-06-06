@@ -376,15 +376,68 @@ body::after {
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   border-radius: 30px;
-  padding: 8px 8px 8px 20px;
+  padding: 6px 6px 6px 12px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   box-shadow: var(--shadow-clay), var(--edge-sheen);
   border: var(--border-glass);
   transition: border-color 0.3s, box-shadow 0.3s;
 }
 #chat-input-area:focus-within { border-color: rgba(212, 175, 55, 0.35); box-shadow: var(--shadow-clay), 0 0 22px var(--accent-glow); }
+
+#chat-input-controls, #chat-input-selectors {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#model-select, #persona-select {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(212, 175, 55, 0.2);
+  color: var(--text-dim);
+  border-radius: 12px;
+  padding: 6px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s;
+  max-width: 120px;
+  font-family: inherit;
+}
+#model-select:hover, #persona-select:hover {
+  background: rgba(212, 175, 55, 0.1);
+  border-color: var(--accent-gold);
+  color: #fff;
+}
+
+#model-select option, #persona-select option { background: #1a1a1a; color: #fff; }
+
+#chat-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-main);
+  font-size: 15px;
+  padding: 8px 4px;
+  resize: none;
+  max-height: 200px;
+  font-family: inherit;
+  outline: none;
+}
+
+#send-btn {
+  background: var(--accent-gold-strong);
+  color: #000;
+  border: none;
+  border-radius: 20px;
+  padding: 8px 18px;
+  font-weight: 800;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+#send-btn:hover { background: var(--accent-gold); box-shadow: 0 0 12px var(--accent-glow); transform: translateY(-1px); }
 
 #attach-btn, #mic-btn {
   display: flex; align-items: center; justify-content: center;

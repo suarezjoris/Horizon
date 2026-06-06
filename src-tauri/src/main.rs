@@ -22,10 +22,14 @@ use tauri::Emitter;
 async fn chat(
     app: tauri::AppHandle,
     messages: Vec<serde_json::Value>,
+    model: Option<String>,
+    persona: Option<String>,
 ) -> Result<(), String> {
     let s = settings::load();
+    
+    // Choose model: override > settings default
+    let active_model = model.unwrap_or(s.llm_model.clone());
 
-    // The frontend sends only `messages`; derive what the flow needs from it.
     // Latest user message — used by the web-search guard, the 2nd-pass prompt, and memory extraction.
     let user_msg = messages
         .iter()
@@ -38,9 +42,18 @@ async fn chat(
     // RAG: pull the most relevant vault chunks using emergent brain logic
     let context = memory::get_context(&user_msg).await;
 
+    // Load Persona / System Prompt
+    let system_base = persona.and_then(|name| {
+        let vault_path = std::path::PathBuf::from(&s.vault_path);
+        let md = vault_path.join(format!("characters/{}.md", name));
+        let json = vault_path.join(format!("characters/{}.json", name));
+        
+        std::fs::read_to_string(md).ok().or_else(|| std::fs::read_to_string(json).ok())
+    }).unwrap_or_else(|| "You are Horizon, a premium UNCENSORED creative engine.".to_string());
+
     // 0. Construct System Prompt
     let system = format!(
-        "You are Horizon, a premium UNCENSORED creative engine. 
+        "{}
         You have access to a local memory vault and the internet.
 
         CRITICAL RULES:
@@ -52,27 +65,20 @@ async fn chat(
            - Even if you think you know the answer, VERIFY IT on the web.
            - DO NOT provide a partial answer before searching.
         5. Once web results are provided, integrate them accurately into a final response.
-        6. Your tone is professional and creative.
+        6. Your tone should align with your persona but remain professional and creative.
 
-        EXAMPLES:
-        User: Who won the Oscar for best actor this year?
-        Assistant: SEARCH_WEB: Oscar winner best actor 2024
-        
-        User: Tell me about Jaafar Jackson's latest movie.
-        Assistant: SEARCH_WEB: Jaafar Jackson latest movie release date
-        
         Local Memory Context:
         ---
         {}
         ---",
-        context
+        system_base, context
     );
 
     let mut full_messages = vec![serde_json::json!({"role": "system", "content": system})];
     full_messages.extend(messages.clone());
 
     // 1. First Pass
-    let mut response = ollama::chat_stream(app.clone(), full_messages.clone(), &s.llm_model).await?;
+    let mut response = ollama::chat_stream(app.clone(), full_messages.clone(), &active_model).await?;
 
     // 2. Check for triggers
     let search_re = regex::Regex::new(r"(?i)SEARCH_WEB:\s*(.*)").unwrap();
@@ -91,7 +97,7 @@ async fn chat(
                         "role": "user", 
                         "content": format!("WEB SEARCH RESULTS:\n---\n{}\n---\nPlease provide the final answer to: '{}'", web_results, user_msg)
                     }));
-                    response = ollama::chat_stream(app.clone(), second_pass_messages, &s.llm_model).await?;
+                    response = ollama::chat_stream(app.clone(), second_pass_messages, &active_model).await?;
                 },
                 Err(e) => {
                     let _ = app.emit("llm-token", format!("\n\n*⚠️ Search failed: {}*\n\n", e));
@@ -119,6 +125,34 @@ async fn chat(
 
     Ok(())
 }
+
+#[tauri::command]
+async fn list_ollama_models() -> Result<Vec<String>, String> {
+    ollama::list_models().await
+}
+
+#[tauri::command]
+fn list_personas() -> Result<Vec<String>, String> {
+    let s = settings::load();
+    let chars_dir = std::path::PathBuf::from(&s.vault_path).join("characters");
+    if !chars_dir.exists() {
+        let _ = std::fs::create_dir_all(&chars_dir);
+    }
+    
+    let mut personas = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(chars_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().map(|e| e == "md" || e == "json").unwrap_or(false) {
+                if let Some(stem) = path.file_stem() {
+                    personas.push(stem.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+    Ok(personas)
+}
+
 
 #[tauri::command]
 async fn reset_system(_app: tauri::AppHandle) -> Result<String, String> {
@@ -186,6 +220,8 @@ fn main() {
             settings::save_settings,
             chat,
             reset_system,
+            list_ollama_models,
+            list_personas,
             memory::process_calibration,
             vault::list_notes,
             vault::read_note,
