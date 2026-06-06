@@ -163,13 +163,11 @@ pub async fn generate_pptx(content: PptxContent) -> Result<String, String> {
     let mut data = serde_json::to_value(&content).map_err(|e| e.to_string())?;
     data["output_path"] = serde_json::json!(output_path.to_string_lossy());
 
-    let python_path = std::env::current_dir()
-        .map_err(|e| e.to_string())?
-        .join(".venv/bin/python3");
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    let project_root = home.join("Projects/Horizon");
     
-    let script_path = std::env::current_dir()
-        .map_err(|e| e.to_string())?
-        .join("src-tauri/src/pptx_gen.py");
+    let python_path = project_root.join(".venv/bin/python3");
+    let script_path = project_root.join("src-tauri/src/pptx_gen.py");
 
     let output = std::process::Command::new(python_path)
         .arg(script_path)

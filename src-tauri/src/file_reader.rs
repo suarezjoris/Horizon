@@ -20,19 +20,21 @@ pub async fn read_file_content(path: String) -> Result<String, String> {
         }
         "docx" | "pptx" | "xlsx" | "xls" => {
             // Use Python bridge for Office files
-            let python_path = std::env::current_dir()
-                .map_err(|e| e.to_string())?
-                .join(".venv/bin/python3");
+            let home = dirs::home_dir().ok_or("Could not find home directory")?;
+            let project_root = home.join("Projects/Horizon");
             
-            let script_path = std::env::current_dir()
-                .map_err(|e| e.to_string())?
-                .join("src-tauri/src/office_reader.py");
+            let python_path = project_root.join(".venv/bin/python3");
+            let script_path = project_root.join("src-tauri/src/office_reader.py");
+
+            if !python_path.exists() {
+                return Err(format!("Python virtualenv not found at {:?}", python_path));
+            }
 
             let output = std::process::Command::new(python_path)
                 .arg(script_path)
                 .arg(&path)
                 .output()
-                .map_err(|e| format!("Failed to run Office reader: {}", e))?;
+                .map_err(|e| format!("Failed to execute Office reader: {}", e))?;
 
             if !output.status.success() {
                 return Err(String::from_utf8_lossy(&output.stderr).to_string());
