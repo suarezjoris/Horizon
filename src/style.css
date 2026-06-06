@@ -216,7 +216,7 @@ body::after {
 }
 .tab:hover::after { animation: shimmerSweep 0.9s var(--ease-out); }
 
-#settings-btn {
+#settings-btn, #help-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -227,9 +227,9 @@ body::after {
   border-radius: 50%;
   transition: color 0.4s, background 0.3s, box-shadow 0.3s;
 }
-#settings-btn svg { width: 22px; height: 22px; stroke: currentColor; }
-#settings-btn:hover { color: var(--accent-gold-strong); background: rgba(212, 175, 55, 0.08); box-shadow: 0 0 18px var(--accent-glow); }
-#settings-btn:hover svg { animation-duration: 4s; }
+#settings-btn svg, #help-btn svg { width: 22px; height: 22px; stroke: currentColor; }
+#settings-btn:hover, #help-btn:hover { color: var(--accent-gold-strong); background: rgba(212, 175, 55, 0.08); box-shadow: 0 0 18px var(--accent-glow); }
+#settings-btn:hover svg, #help-btn:hover svg { animation-duration: 4s; }
 
 /* ========================================================================
    4. PANELS  (isolation rules — DO NOT ALTER the display logic)
@@ -689,15 +689,15 @@ body::after {
 #generate-video-btn:disabled { opacity: 0.4; cursor: wait; transform: none; }
 
 /* ========================================================================
-   8. SETTINGS — Hextech Modal
+   8. SETTINGS & HELP — Hextech Modal
    ======================================================================== */
-#settings-overlay {
+#settings-overlay, #help-overlay {
   display: none; position: fixed; inset: 0;
   background: rgba(0, 0, 0, 0.62);
   backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
   z-index: 1000; align-items: center; justify-content: center;
 }
-#settings-overlay.open { display: flex; animation: modalIn 0.4s var(--ease-spring); }
+#settings-overlay.open, #help-overlay.open { display: flex; animation: modalIn 0.4s var(--ease-spring); }
 @keyframes modalIn { from { opacity: 0; transform: scale(0.95) translateY(12px); } to { opacity: 1; transform: scale(1) translateY(0); } }
 
 #settings-panel {

@@ -14,6 +14,7 @@ mod cinema;
 mod search;
 mod settings;
 mod vault;
+mod graphify;
 
 use tauri::Emitter;
 
@@ -33,26 +34,9 @@ async fn chat(
         .and_then(|m| m.get("content").and_then(|c| c.as_str()))
         .unwrap_or("")
         .to_string();
-    // RAG: pull the most relevant vault chunks for this message (best-effort —
-    // any failure or empty index just yields no context, chat still works).
-    let context = {
-        let index = embeddings::load_index(&s.embeddings_path);
-        if index.is_empty() || user_msg.is_empty() {
-            String::new()
-        } else {
-            match ollama::embed(vec![user_msg.clone()], "nomic-embed-text:latest").await {
-                Ok(vecs) => match vecs.into_iter().next() {
-                    Some(qvec) => embeddings::search(&index, &qvec, 3)
-                        .iter()
-                        .map(|e| format!("[{}]\n{}", e.path, &e.chunk[..e.chunk.len().min(400)]))
-                        .collect::<Vec<_>>()
-                        .join("\n\n"),
-                    None => String::new(),
-                },
-                Err(_) => String::new(),
-            }
-        }
-    };
+
+    // RAG: pull the most relevant vault chunks using emergent brain logic
+    let context = memory::get_context(&user_msg).await;
 
     // 0. Construct System Prompt
     let system = format!(
@@ -151,13 +135,22 @@ async fn reset_system(_app: tauri::AppHandle) -> Result<String, String> {
             }
         }
     }
+    
+    // Wipe the graphify cache
+    if let Ok(pwd) = std::env::current_dir() {
+        let graphify_out = pwd.join("graphify-out").join("vault");
+        if graphify_out.exists() {
+            let _ = std::fs::remove_dir_all(graphify_out);
+        }
+    }
+
     let memory_dir = vault_path.join("memory");
     std::fs::create_dir_all(&memory_dir).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(vault_path.join("images")).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(vault_path.join("characters")).map_err(|e| e.to_string())?;
-    std::fs::write(memory_dir.join("user.md"), "# User Profile\n").map_err(|e| e.to_string())?;
-    std::fs::write(memory_dir.join("code.md"), "# Code Preferences\n").map_err(|e| e.to_string())?;
-    std::fs::write(memory_dir.join("skills.md"), "# Skills & Knowledge\n").map_err(|e| e.to_string())?;
+    
+    // Do NOT recreate legacy files here so the emergent brain starts completely clean
+    
     Ok("System reset complete. Vault is now 100% clean.".to_string())
 }
 
@@ -197,6 +190,8 @@ fn main() {
             vault::list_notes,
             vault::read_note,
             vault::write_note,
+            memory::consolidate_vault,
+            graphify::run_graphify,
             embeddings::reindex,
             search_vault,
             file_reader::read_file_content,

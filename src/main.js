@@ -66,6 +66,19 @@ document.getElementById('settings-save').addEventListener('click', async () => {
   document.getElementById('settings-overlay').classList.remove('open');
 });
 
+// Help / Cheatsheet Modal Logic
+document.getElementById('help-btn').addEventListener('click', () => {
+  document.getElementById('help-overlay').classList.add('open');
+});
+
+document.getElementById('close-help-btn').addEventListener('click', () => {
+  document.getElementById('help-overlay').classList.remove('open');
+});
+
+document.getElementById('help-overlay').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
+});
+
 document.getElementById('reset-mem-btn').addEventListener('click', async () => {
   if (confirm("DANGEROUS: This will wipe all learned memories and knowledge about you. Are you sure?")) {
     try {

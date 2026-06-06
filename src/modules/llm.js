@@ -154,6 +154,17 @@ async function send() {
       return;
     }
 
+    if (cmd === 'consolidate') {
+      const bubble = addBubble('ai', 'Consolidating neurons... refactoring the Second Brain.');
+      try {
+        const msg = await invoke('consolidate_vault');
+        bubble.textContent = msg;
+      } catch (err) {
+        bubble.textContent = `Consolidation failed: ${err}`;
+      }
+      return;
+    }
+
     if (cmd === 'search') {
       if (!query) { addBubble('ai', 'Usage: /search <query>'); return; }
       addBubble('user', `Searching for: ${query}`);

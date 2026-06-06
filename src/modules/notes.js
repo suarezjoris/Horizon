@@ -65,7 +65,7 @@
         refreshNotes();
     };
 
-    toggleMindmapBtn.onclick = () => {
+    toggleMindmapBtn.onclick = async () => {
         isMindmapVisible = !isMindmapVisible;
         mindmapContainer.classList.toggle('hidden', !isMindmapVisible);
         noteContent.classList.toggle('hidden', isMindmapVisible);
@@ -73,39 +73,50 @@
     };
 
     async function renderMindmap() {
-        console.log("[NeuralField] Rendering graph...");
-        mindmapContainer.innerHTML = '';
+        mindmapContainer.innerHTML = '<div class="loading" style="padding: 20px; color: #b3b3b3; font-family: monospace;">Loading Local Vault Graph...</div>';
         
         try {
-            // Fetch ALL notes from the sidebar to build the graph
+            // 1. Locally parse the vault
             const notes = await invoke('list_notes');
-            let nodes = [{ id: "Horizon", group: 0 }];
+            let nodesMap = new Map();
             let links = [];
 
+            // Initialize all nodes
             for (const path of notes) {
-                try {
-                    const content = await invoke('read_note', { relPath: path });
-                    const fileName = path.replace('.md', '');
-                    nodes.push({ id: path, name: fileName, group: 1 });
-                    links.push({ source: "Horizon", target: path });
-
-                    // Extract bullet points (* or -) as sub-nodes
-                    const lines = content.split('\n').filter(l => {
-                        const trimmed = l.trim();
-                        return trimmed.startsWith('-') || trimmed.startsWith('*');
-                    });
-
-                    lines.forEach((l, i) => {
-                        const factId = `${path}_fact_${i}`;
-                        const factText = l.trim().substring(1).trim();
-                        if (factText.length > 3) {
-                            nodes.push({ id: factId, name: factText, group: 2 });
-                            links.push({ source: path, target: factId });
-                        }
-                    });
-                } catch (e) {}
+                const id = path.replace('.md', '');
+                nodesMap.set(id, { id: id, name: id });
             }
 
+            // Read content and extract wikilinks
+            for (const path of notes) {
+                const sourceId = path.replace('.md', '');
+                try {
+                    const content = await invoke('read_note', { relPath: path });
+                    // Match [[Link]] or [[Link|Alias]]
+                    const regex = /\[\[(.*?)\]\]/g;
+                    let match;
+                    while ((match = regex.exec(content)) !== null) {
+                        let target = match[1].split('|')[0].trim();
+                        // Ignore internet searches in the graph view
+                        if (target.startsWith('internet_search:')) continue;
+                        
+                        target = target.replace('.md', '');
+                        
+                        // If target doesn't exist, create it as a ghost node (Obsidian does this)
+                        if (!nodesMap.has(target)) {
+                            nodesMap.set(target, { id: target, name: target, ghost: true });
+                        }
+
+                        links.push({ source: sourceId, target: target });
+                    }
+                } catch (e) {
+                    console.error("Error reading note for graph", e);
+                }
+            }
+
+            let nodes = Array.from(nodesMap.values());
+            
+            mindmapContainer.innerHTML = '';
             const width = mindmapContainer.clientWidth;
             const height = mindmapContainer.clientHeight || 500;
 
@@ -113,20 +124,34 @@
                 .append("svg")
                 .attr("width", "100%")
                 .attr("height", "100%")
-                .attr("viewBox", [0, 0, width, height]);
+                .attr("viewBox", [0, 0, width, height])
+                .style("background-color", "transparent"); // Inherit dark theme
+
+            const g = svg.append("g");
+
+            const zoom = d3.zoom()
+                .scaleExtent([0.1, 4])
+                .on("zoom", (event) => {
+                    g.attr("transform", event.transform);
+                });
+
+            svg.call(zoom);
 
             const simulation = d3.forceSimulation(nodes)
                 .force("link", d3.forceLink(links).id(d => d.id).distance(100))
-                .force("charge", d3.forceManyBody().strength(-200))
-                .force("center", d3.forceCenter(width / 2, height / 2));
+                .force("charge", d3.forceManyBody().strength(-300))
+                .force("center", d3.forceCenter(width / 2, height / 2))
+                .force("x", d3.forceX(width / 2).strength(0.05))
+                .force("y", d3.forceY(height / 2).strength(0.05));
 
-            const link = svg.append("g")
-                .attr("stroke", "rgba(212, 175, 55, 0.2)")
+            const link = g.append("g")
+                .attr("stroke", "rgba(255, 255, 255, 0.2)")
                 .selectAll("line")
                 .data(links)
-                .join("line");
+                .join("line")
+                .attr("stroke-width", 1);
 
-            const node = svg.append("g")
+            const node = g.append("g")
                 .selectAll("g")
                 .data(nodes)
                 .join("g")
@@ -135,17 +160,20 @@
                     .on("drag", dragged)
                     .on("end", dragended));
 
+            // Obsidian style: Light grey nodes, slightly smaller, ghost nodes are darker
             node.append("circle")
-                .attr("r", d => d.group === 0 ? 12 : d.group === 1 ? 8 : 5)
-                .attr("fill", d => d.group === 0 ? "#d4af37" : d.group === 1 ? "#00f2ff" : "#fff")
-                .attr("filter", "drop-shadow(0 0 5px rgba(212, 175, 55, 0.5))");
+                .attr("r", 6)
+                .attr("fill", d => d.ghost ? "#555555" : "#a8a8a8")
+                .attr("stroke", d => d.ghost ? "#333" : "none")
+                .attr("stroke-width", 1);
 
             node.append("text")
-                .text(d => d.name || d.id)
-                .attr("x", 12)
+                .text(d => d.name)
+                .attr("x", 10)
                 .attr("y", 4)
                 .attr("fill", "rgba(255,255,255,0.7)")
-                .style("font-size", "10px")
+                .style("font-size", "12px")
+                .style("font-family", "sans-serif")
                 .style("pointer-events", "none");
 
             simulation.on("tick", () => {
@@ -172,7 +200,11 @@
                 event.subject.fy = null;
             }
 
+            // Initial center zoom
+            svg.call(zoom.transform, d3.zoomIdentity.translate(width/2, height/2).scale(1).translate(-width/2, -height/2));
+
         } catch (e) {
+            mindmapContainer.innerHTML = `<div class="error" style="color: red; padding: 20px;">Graph failed: ${e}</div>`;
             console.error("Graph error", e);
         }
     }

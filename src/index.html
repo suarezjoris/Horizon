@@ -72,8 +72,13 @@
       <span>Code</span>
     </div>
   </div>
-  <div id="settings-btn">
-    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+  <div id="sidebar-actions" style="display: flex; gap: 8px;">
+    <div id="help-btn" title="Cheatsheet & Help">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    </div>
+    <div id="settings-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </div>
   </div>
 </div>
 
@@ -225,6 +230,46 @@
       </button>
     </div>
     <div id="oc-xterm-container"></div>
+  </div>
+</div>
+
+<div id="help-overlay" class="overlay">
+  <div id="help-panel" style="max-width: 600px; padding: 20px; border-radius: 12px; background: var(--bg-surface); border: 1px solid var(--border-color); color: var(--text-dim); max-height: 80vh; overflow-y: auto;">
+    <h3 style="color: var(--accent-gold); margin-bottom: 15px; margin-top: 0;">Cheatsheet & AI Technologies</h3>
+    
+    <h4 style="color: var(--text-color); margin-bottom: 5px;">🤖 AI Stack</h4>
+    <ul style="margin-top: 5px; line-height: 1.5; font-size: 0.95em;">
+      <li><strong>LLM (Chat):</strong> Ollama local instance (Dolphin-Mixtral / Qwen / etc.)</li>
+      <li><strong>Image Gen:</strong> ComfyUI via API (Stable Diffusion / SDXL)</li>
+      <li><strong>Video Gen:</strong> ComfyUI (Image-to-Video models like SVD)</li>
+      <li><strong>Second Brain:</strong> Local Markdown Zettelkasten + Ollama semantic extraction</li>
+      <li><strong>RAG & Memory:</strong> ChromaDB + Nomic-Embed-Text + Native D3.js Neural Field</li>
+      <li><strong>Web Search:</strong> DuckDuckGo (duckduckgo-search) + html2text</li>
+    </ul>
+
+    <h4 style="color: var(--text-color); margin-bottom: 5px;">💬 Chat Commands</h4>
+    <ul style="margin-top: 5px; line-height: 1.5; font-size: 0.95em;">
+      <li><strong style="color: var(--accent-gold);">/clear</strong> : Clear the current chat history.</li>
+      <li><strong style="color: var(--accent-gold);">/memory</strong> : View the RAG chunks retrieved for the last message.</li>
+      <li><strong style="color: var(--accent-gold);">/search &lt;query&gt;</strong> : Manually search the Second Brain vault.</li>
+      <li><strong style="color: var(--accent-gold);">/note &lt;text&gt;</strong> : Quickly save a timestamped note to the vault.</li>
+      <li><strong style="color: var(--accent-gold);">/reindex</strong> : Rebuild the RAG vector index (ChromaDB).</li>
+      <li><strong style="color: var(--accent-gold);">/consolidate</strong> : Ask the AI to refactor and link your Second Brain notes.</li>
+      <li><strong style="color: var(--accent-gold);">/file &lt;path&gt;</strong> : Load a file into context (or drag & drop).</li>
+      <li><strong style="color: var(--accent-gold);">/paste</strong> : Paste an image from the clipboard (or press F2).</li>
+    </ul>
+
+    <h4 style="color: var(--text-color); margin-bottom: 5px;">⚡ Auto-Triggers (LLM side)</h4>
+    <p style="margin-top: 5px; font-size: 0.9em;">Horizon automatically invokes these capabilities when it detects certain keywords in its own responses:</p>
+    <ul style="margin-top: 5px; line-height: 1.5; font-size: 0.95em;">
+      <li><strong>SEARCH_WEB: &lt;query&gt;</strong> -> Performs internet search and answers.</li>
+      <li><strong>GENERATE_IMAGE: &lt;prompt&gt;</strong> -> Switches to Image tab and starts rendering.</li>
+      <li><strong>GENERATE_VIDEO: &lt;prompt&gt;</strong> -> Switches to Cinema tab and starts animating.</li>
+    </ul>
+
+    <div style="text-align: right; margin-top: 20px;">
+      <button id="close-help-btn" style="background: rgba(255,255,255,0.1); color: var(--text-color); border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer;">Close</button>
+    </div>
   </div>
 </div>
 
