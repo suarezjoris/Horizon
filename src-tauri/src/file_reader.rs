@@ -14,10 +14,30 @@ pub async fn read_file_content(path: String) -> Result<String, String> {
 
     match ext.as_str() {
         "pdf" => {
-            // Read PDF text
             let bytes = fs::read(p).map_err(|e| e.to_string())?;
             let out = pdf_extract::extract_text_from_mem(&bytes).map_err(|e| e.to_string())?;
             Ok(out)
+        }
+        "docx" | "pptx" | "xlsx" | "xls" => {
+            // Use Python bridge for Office files
+            let python_path = std::env::current_dir()
+                .map_err(|e| e.to_string())?
+                .join(".venv/bin/python3");
+            
+            let script_path = std::env::current_dir()
+                .map_err(|e| e.to_string())?
+                .join("src-tauri/src/office_reader.py");
+
+            let output = std::process::Command::new(python_path)
+                .arg(script_path)
+                .arg(&path)
+                .output()
+                .map_err(|e| format!("Failed to run Office reader: {}", e))?;
+
+            if !output.status.success() {
+                return Err(String::from_utf8_lossy(&output.stderr).to_string());
+            }
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
         }
         "png" | "jpg" | "jpeg" | "webp" => {
             let bytes = fs::read(p).map_err(|e| e.to_string())?;
