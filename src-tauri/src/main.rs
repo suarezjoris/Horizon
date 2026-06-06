@@ -59,14 +59,25 @@ async fn chat(
 
         CRITICAL RULES:
         1. NEVER output raw memory markers like '### memory/'. Use the context naturally.
-        2. GENERATE_IMAGE: To create an image, start with 'GENERATE_IMAGE:' followed by the prompt.
-        3. GENERATE_VIDEO: To create a video, start with 'GENERATE_VIDEO:' followed by the prompt.
-        4. SEARCH_WEB: If you need factual data or current events (news, people, tech), you MUST write 'SEARCH_WEB: <query>' and NOTHING ELSE. Verify everything.
-        5. GENERATE_DOCX: To create a Word document, you MUST output:
-           GENERATE_DOCX: {{ \"filename\": \"name\", \"title\": \"Title\", \"sections\": [{{ \"heading\": \"H1\", \"body\": \"text\" }}] }}
-        6. GENERATE_XLSX: To create an Excel file, you MUST output:
+        2. LANGUAGE: Always respond in the SAME LANGUAGE as the user's request.
+        3. ACCURACY: Do NOT speculate or invent reviews, ratings, or reception for unreleased media or future events. If a date is in the future, state that it is upcoming.
+        4. GENERATE_IMAGE: To create an image, start with 'GENERATE_IMAGE:' followed by the prompt.
+        5. GENERATE_VIDEO: To create a video, start with 'GENERATE_VIDEO:' followed by the prompt.
+        6. SEARCH_WEB: If you need factual data, news, or any entity you are not 100% familiar with, you MUST write 'SEARCH_WEB: <query>' and NOTHING ELSE. Perform DEEP research (dates, numbers, budgets, cast).
+        7. GENERATE_DOCX: To create a professional Word document, output:
+           GENERATE_DOCX: {{
+             \"filename\": \"name\",
+             \"title\": \"Main Title\",
+             \"elements\": [
+               {{ \"type\": \"heading\", \"level\": 1, \"text\": \"Title\" }},
+               {{ \"type\": \"paragraph\", \"text\": \"Content...\", \"bold\": false, \"italic\": false, \"align\": \"left\" }},
+               {{ \"type\": \"metadata\", \"label\": \"Label\", \"value\": \"Value\" }},
+               {{ \"type\": \"list\", \"items\": [\"item 1\", \"item 2\"] }}
+             ]
+           }}
+        8. GENERATE_XLSX: To create an Excel file, you MUST output:
            GENERATE_XLSX: {{ \"filename\": \"name\", \"sheets\": [{{ \"name\": \"Sheet1\", \"rows\": [[\"Col1\", \"Col2\"], [\"Val1\", \"Val2\"]] }}] }}
-        7. Your tone should align with your persona but remain professional and creative.
+        9. Your tone should align with your persona but remain professional and creative.
 
         Local Memory Context:
         ---
@@ -75,71 +86,93 @@ async fn chat(
         system_base, context
     );
 
-    let mut full_messages = vec![serde_json::json!({"role": "system", "content": system})];
-    full_messages.extend(messages.clone());
+    let mut current_messages = vec![serde_json::json!({"role": "system", "content": system.clone()})];
+    current_messages.extend(messages.clone());
 
-    // 1. First Pass
-    let mut response = ollama::chat_stream(app.clone(), full_messages.clone(), &active_model).await?;
+    let mut final_response = String::new();
+    let mut iteration = 0;
+    const MAX_ITERATIONS: usize = 3;
 
-    // 2. Check for triggers
-    let search_re = regex::Regex::new(r"(?i)SEARCH_WEB:\s*(.*)").unwrap();
-    let image_re = regex::Regex::new(r"(?i)GENERATE_IMAGE:\s*(.*)").unwrap();
-    let video_re = regex::Regex::new(r"(?i)GENERATE_VIDEO:\s*(.*)").unwrap();
-    let docx_re = regex::Regex::new(r"(?i)GENERATE_DOCX:\s*(\{.*\})").unwrap();
-    let xlsx_re = regex::Regex::new(r"(?i)GENERATE_XLSX:\s*(\{.*\})").unwrap();
+    while iteration < MAX_ITERATIONS {
+        iteration += 1;
+        
+        // Peek at the response silently to check for triggers
+        let response = ollama::chat_once(current_messages.clone(), &active_model).await?;
+        final_response = response.clone();
 
-    if let Some(caps) = search_re.captures(&response) {
-        let query = caps.get(1).map_or("", |m| m.as_str().trim());
-        if !query.is_empty() && !user_msg.contains("WEB SEARCH RESULTS:") {
-            let _ = app.emit("llm-token", "CLEAR_AND_SEARCH");
-            match search::duckduckgo_search(query).await {
-                Ok(web_results) => {
-                    let mut second_pass_messages = vec![serde_json::json!({"role": "system", "content": format!("{} \n\nIMPORTANT: Use the following WEB SEARCH RESULTS to answer accurately.", system)})];
-                    second_pass_messages.extend(messages.clone());
-                    second_pass_messages.push(serde_json::json!({
-                        "role": "user", 
-                        "content": format!("WEB SEARCH RESULTS:\n---\n{}\n---\nPlease provide the final answer to: '{}'", web_results, user_msg)
-                    }));
-                    response = ollama::chat_stream(app.clone(), second_pass_messages, &active_model).await?;
-                },
-                Err(e) => {
-                    let _ = app.emit("llm-token", format!("\n\n*⚠️ Search failed: {}*\n\n", e));
+        let search_re = regex::Regex::new(r"(?si)SEARCH_WEB:\s*(.*)").unwrap();
+        let docx_re = regex::Regex::new(r"(?si)GENERATE_DOCX:\s*(\{.*\})").unwrap();
+        let xlsx_re = regex::Regex::new(r"(?si)GENERATE_XLSX:\s*(\{.*\})").unwrap();
+
+        if let Some(caps) = search_re.captures(&response) {
+            let query = caps.get(1).map_or("", |m| m.as_str().trim());
+            if !query.is_empty() {
+                let _ = app.emit("llm-token", "CLEAR_AND_SEARCH");
+                match search::duckduckgo_search(query).await {
+                    Ok(web_results) => {
+                        current_messages.push(serde_json::json!({"role": "assistant", "content": response}));
+                        current_messages.push(serde_json::json!({
+                            "role": "user", 
+                            "content": format!("WEB SEARCH RESULTS:\n---\n{}\n---\nIMPORTANT: The research is complete. Now fulfill the user's request with MAXIMUM detail and professional structure. 
+                            If a document was requested, use the rich schema provided in your instructions to create a comprehensive report (Intro, Metadata, Sections, Lists). 
+                            Be as accurate and thorough as a top-tier journalist. Answer in the user's language.", web_results)
+                        }));
+                        continue; 
+                    },
+                    Err(e) => {
+                        let _ = app.emit("llm-token", format!("\n\n*⚠️ Search failed: {}*\n\n", e));
+                    }
+                }
+            }
+        } else if let Some(caps) = docx_re.captures(&response) {
+            let json_str = caps.get(1).map_or("", |m| m.as_str().trim());
+            if let Ok(content) = serde_json::from_str::<office::DocxContent>(json_str) {
+                match office::generate_docx(content).await {
+                    Ok(path) => { 
+                        let filename = std::path::Path::new(&path).file_name().unwrap().to_string_lossy();
+                        let _ = app.emit("llm-token", format!("OFFICE_GEN_SUCCESS:{}", path)); 
+
+                        current_messages.push(serde_json::json!({"role": "assistant", "content": response}));
+                        current_messages.push(serde_json::json!({
+                            "role": "system", 
+                            "content": format!("Success: document generated at {}. Now, simply tell the user (in their language) that the document '{}' is ready. Do NOT output any more tags or JSON.", path, filename)
+                        }));
+                        continue;
+                    },
+                    Err(e) => { let _ = app.emit("llm-token", format!("\n\n❌ **Échec Word :** {}", e)); }
                 }
             }
         }
-    } else if let Some(caps) = docx_re.captures(&response) {
-        let json_str = caps.get(1).map_or("", |m| m.as_str().trim());
-        if let Ok(content) = serde_json::from_str(json_str) {
-            match office::generate_docx(content).await {
-                Ok(filename) => { let _ = app.emit("llm-token", format!("\n\n📄 **Document Word généré :** `{}`\n*Retrouvez-le dans votre dossier documents.*", filename)); },
-                Err(e) => { let _ = app.emit("llm-token", format!("\n\n❌ **Échec Word :** {}", e)); }
+ else if let Some(caps) = xlsx_re.captures(&response) {
+            let json_str = caps.get(1).map_or("", |m| m.as_str().trim());
+            if let Ok(content) = serde_json::from_str::<office::XlsxContent>(json_str) {
+                match office::generate_xlsx(content).await {
+                    Ok(path) => { 
+                        let filename = std::path::Path::new(&path).file_name().unwrap().to_string_lossy();
+                        let _ = app.emit("llm-token", format!("\n\n📊 **Fichier Excel généré :** `{}`\n*Localisation : {}*", filename, path)); 
+                        
+                        current_messages.push(serde_json::json!({"role": "assistant", "content": response}));
+                        current_messages.push(serde_json::json!({
+                            "role": "system", 
+                            "content": format!("Success: excel at {}. Inform the user in their language.", path)
+                        }));
+                        continue;
+                    },
+                    Err(e) => { let _ = app.emit("llm-token", format!("\n\n❌ **Échec Excel :** {}", e)); }
+                }
             }
         }
-    } else if let Some(caps) = xlsx_re.captures(&response) {
-        let json_str = caps.get(1).map_or("", |m| m.as_str().trim());
-        if let Ok(content) = serde_json::from_str(json_str) {
-            match office::generate_xlsx(content).await {
-                Ok(filename) => { let _ = app.emit("llm-token", format!("\n\n📊 **Fichier Excel généré :** `{}`\n*Retrouvez-le dans votre dossier documents.*", filename)); },
-                Err(e) => { let _ = app.emit("llm-token", format!("\n\n❌ **Échec Excel :** {}", e)); }
-            }
-        }
-    } else if let Some(caps) = image_re.captures(&response) {
-        let prompt = caps.get(1).map_or("", |m| m.as_str().trim());
-        if !prompt.is_empty() {
-             let _ = app.emit("llm-token", format!("\n\n*🎨 Horizon is preparing to generate an image for:* **{}**\n\n*Switching to Image tab...*", prompt));
-        }
-    } else if let Some(caps) = video_re.captures(&response) {
-        let prompt = caps.get(1).map_or("", |m| m.as_str().trim());
-        if !prompt.is_empty() {
-             let _ = app.emit("llm-token", format!("\n\n*🎬 Horizon is preparing to direct a film for:* **{}**\n\n*Switching to Cinema tab...*", prompt));
-        }
+        
+        // Final conversational response (streamed)
+        final_response = ollama::chat_stream(app.clone(), current_messages.clone(), &active_model, false).await?;
+        break; 
     }
 
-    let _ = app.emit("llm-done", &response);
+    let _ = app.emit("llm-done", &final_response);
 
     // Extraction as background task
     tokio::spawn(async move {
-        memory::extract_and_save(user_msg, response).await;
+        memory::extract_and_save(user_msg, final_response).await;
     });
 
     Ok(())
@@ -148,6 +181,29 @@ async fn chat(
 #[tauri::command]
 async fn list_ollama_models() -> Result<Vec<String>, String> {
     ollama::list_models().await
+}
+
+#[tauri::command]
+fn open_docs_folder() -> Result<(), String> {
+    let s = settings::load();
+    let path = std::path::PathBuf::from(&s.vault_path).join("documents");
+    if !path.exists() {
+        let _ = std::fs::create_dir_all(&path);
+    }
+    
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer").arg(&path).spawn().map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open").arg(&path).spawn().map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(&path).spawn().map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -241,6 +297,7 @@ fn main() {
             reset_system,
             list_ollama_models,
             list_personas,
+            open_docs_folder,
             office::generate_docx,
             office::generate_xlsx,
             memory::process_calibration,

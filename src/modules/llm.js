@@ -247,12 +247,35 @@ async function send() {
   if (unlistenToken) { await unlistenToken(); unlistenToken = null; }
   if (unlistenDone)  { await unlistenDone();  unlistenDone = null; }
 
-  unlistenToken = await listen('llm-token', e => {
+  unlistenToken = await listen('llm-token', async e => {
     if (e.payload === "CLEAR_AND_SEARCH") {
       accumulatedText = "*🌐 Horizon is searching the web...*\n\n";
       streamingBubble.textContent = accumulatedText;
       return;
     }
+    
+    // Hide raw trigger tags from UI
+    if (e.payload.startsWith("GENERATE_DOCX:") || e.payload.startsWith("GENERATE_XLSX:") || e.payload.startsWith("SEARCH_WEB:")) {
+        return;
+    }
+
+    // Detect document generation success in stream and provide a button
+    if (e.payload.startsWith("OFFICE_GEN_SUCCESS:")) {
+        const path = e.payload.split("OFFICE_GEN_SUCCESS:")[1];
+        const filename = path.split('/').pop().split('\\').pop();
+        
+        accumulatedText += `\n\n📄 **Document prêt :** \`${filename}\``;
+        streamingBubble.innerHTML = DOMPurify.sanitize(marked.parse(accumulatedText));
+        
+        const btn = document.createElement('button');
+        btn.innerHTML = "📂 Ouvrir le dossier documents";
+        btn.className = "office-gen-btn";
+        btn.style = "margin-top: 15px; display: block; background: var(--accent-gold-strong); color: #000; border: none; padding: 10px 16px; border-radius: 12px; cursor: pointer; font-size: 12px; font-weight: 800; box-shadow: 0 4px 15px rgba(212,175,55,0.3); transition: all 0.2s;";
+        btn.onclick = () => invoke('open_docs_folder');
+        streamingBubble.appendChild(btn);
+        return;
+    }
+
     accumulatedText += e.payload;
     streamingBubble.textContent = accumulatedText;
     history.scrollTop = history.scrollHeight;

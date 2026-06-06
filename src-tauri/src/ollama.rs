@@ -41,6 +41,7 @@ pub async fn chat_stream(
     app: tauri::AppHandle,
     messages: Vec<serde_json::Value>,
     model: &str,
+    silent: bool,
 ) -> Result<String, String> {
     let client = Client::new();
     let response = client
@@ -65,13 +66,16 @@ pub async fn chat_stream(
 
     while let Some(chunk) = byte_stream.next().await {
         buf.extend_from_slice(&chunk.map_err(|e| e.to_string())?);
+        
         while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
             let line: Vec<u8> = buf.drain(..=pos).collect();
-            // Try to parse the line as JSON directly from bytes
             if let Ok(c) = serde_json::from_slice::<ChatChunk>(&line) {
                 if !c.done {
-                    full.push_str(&c.message.content);
-                    let _ = app.emit("llm-token", &c.message.content);
+                    let content = c.message.content;
+                    full.push_str(&content);
+                    if !silent {
+                        let _ = app.emit("llm-token", &content);
+                    }
                 }
             }
         }
