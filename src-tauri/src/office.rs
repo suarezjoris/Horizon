@@ -46,6 +46,20 @@ pub struct XlsxSheet {
     pub rows: Vec<Vec<String>>,
 }
 
+#[derive(Deserialize, serde::Serialize)]
+pub struct PptxContent {
+    pub filename: String,
+    pub title: String,
+    pub slides: Vec<PptxSlide>,
+}
+
+#[derive(Deserialize, serde::Serialize)]
+pub struct PptxSlide {
+    pub title: String,
+    pub intro: String,
+    pub bullets: Vec<String>,
+}
+
 #[tauri::command]
 pub async fn generate_docx(content: DocxContent) -> Result<String, String> {
     let s = settings::load();
@@ -135,6 +149,39 @@ pub async fn generate_docx(content: DocxContent) -> Result<String, String> {
     doc.build().pack(file).map_err(|e| e.to_string())?;
 
     Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn generate_pptx(content: PptxContent) -> Result<String, String> {
+    let s = settings::load();
+    let base_path = PathBuf::from(&s.vault_path).join("documents");
+    std::fs::create_dir_all(&base_path).map_err(|e| e.to_string())?;
+
+    let filename = if content.filename.ends_with(".pptx") { content.filename.clone() } else { format!("{}.pptx", content.filename) };
+    let output_path = base_path.join(&filename);
+    
+    let mut data = serde_json::to_value(&content).map_err(|e| e.to_string())?;
+    data["output_path"] = serde_json::json!(output_path.to_string_lossy());
+
+    let python_path = std::env::current_dir()
+        .map_err(|e| e.to_string())?
+        .join(".venv/bin/python3");
+    
+    let script_path = std::env::current_dir()
+        .map_err(|e| e.to_string())?
+        .join("src-tauri/src/pptx_gen.py");
+
+    let output = std::process::Command::new(python_path)
+        .arg(script_path)
+        .arg(serde_json::to_string(&data).unwrap())
+        .output()
+        .map_err(|e| format!("Failed to run PPTX generator: {}", e))?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+
+    Ok(output_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]

@@ -77,7 +77,9 @@ async fn chat(
            }}
         8. GENERATE_XLSX: To create an Excel file, you MUST output:
            GENERATE_XLSX: {{ \"filename\": \"name\", \"sheets\": [{{ \"name\": \"Sheet1\", \"rows\": [[\"Col1\", \"Col2\"], [\"Val1\", \"Val2\"]] }}] }}
-        9. Your tone should align with your persona but remain professional and creative.
+        9. GENERATE_PPTX: To create a PowerPoint presentation, you MUST output:
+           GENERATE_PPTX: {{ \"filename\": \"name\", \"title\": \"Main Title\", \"slides\": [{{ \"title\": \"Slide 1\", \"intro\": \"Summary\", \"bullets\": [\"fact 1\", \"fact 2\"] }}] }}
+        10. Your tone should align with your persona but remain professional and creative.
 
         Local Memory Context:
         ---
@@ -103,6 +105,7 @@ async fn chat(
         let search_re = regex::Regex::new(r"(?si)SEARCH_WEB:\s*(.*)").unwrap();
         let docx_re = regex::Regex::new(r"(?si)GENERATE_DOCX:\s*(\{.*\})").unwrap();
         let xlsx_re = regex::Regex::new(r"(?si)GENERATE_XLSX:\s*(\{.*\})").unwrap();
+        let pptx_re = regex::Regex::new(r"(?si)GENERATE_PPTX:\s*(\{.*\})").unwrap();
 
         if let Some(caps) = search_re.captures(&response) {
             let query = caps.get(1).map_or("", |m| m.as_str().trim());
@@ -114,7 +117,7 @@ async fn chat(
                         current_messages.push(serde_json::json!({
                             "role": "user", 
                             "content": format!("WEB SEARCH RESULTS:\n---\n{}\n---\nIMPORTANT: The research is complete. Now fulfill the user's request with MAXIMUM detail and professional structure. 
-                            If a document was requested, use the rich schema provided in your instructions to create a comprehensive report (Intro, Metadata, Sections, Lists). 
+                            If a document was requested (DOCX, XLSX, or PPTX), use the rich schema provided in your instructions. 
                             Be as accurate and thorough as a top-tier journalist. Answer in the user's language.", web_results)
                         }));
                         continue; 
@@ -122,6 +125,24 @@ async fn chat(
                     Err(e) => {
                         let _ = app.emit("llm-token", format!("\n\n*⚠️ Search failed: {}*\n\n", e));
                     }
+                }
+            }
+        } else if let Some(caps) = pptx_re.captures(&response) {
+            let json_str = caps.get(1).map_or("", |m| m.as_str().trim());
+            if let Ok(content) = serde_json::from_str::<office::PptxContent>(json_str) {
+                match office::generate_pptx(content).await {
+                    Ok(path) => { 
+                        let filename = std::path::Path::new(&path).file_name().unwrap().to_string_lossy();
+                        let _ = app.emit("llm-token", format!("OFFICE_GEN_SUCCESS:{}", path)); 
+
+                        current_messages.push(serde_json::json!({"role": "assistant", "content": response}));
+                        current_messages.push(serde_json::json!({
+                            "role": "system", 
+                            "content": format!("Success: PowerPoint at {}. Now, inform the user in their language that '{}' is ready.", path, filename)
+                        }));
+                        continue;
+                    },
+                    Err(e) => { let _ = app.emit("llm-token", format!("\n\n❌ **Échec PowerPoint :** {}", e)); }
                 }
             }
         } else if let Some(caps) = docx_re.captures(&response) {
@@ -300,6 +321,7 @@ fn main() {
             open_docs_folder,
             office::generate_docx,
             office::generate_xlsx,
+            office::generate_pptx,
             memory::process_calibration,
             vault::list_notes,
             vault::read_note,
