@@ -67,9 +67,8 @@ pub async fn chat_stream(
         buf.extend_from_slice(&chunk.map_err(|e| e.to_string())?);
         while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
             let line: Vec<u8> = buf.drain(..=pos).collect();
-            let s = String::from_utf8_lossy(&line[..line.len().saturating_sub(1)]);
-            if s.is_empty() { continue; }
-            if let Ok(c) = serde_json::from_str::<ChatChunk>(&s) {
+            // Try to parse the line as JSON directly from bytes
+            if let Ok(c) = serde_json::from_slice::<ChatChunk>(&line) {
                 if !c.done {
                     full.push_str(&c.message.content);
                     let _ = app.emit("llm-token", &c.message.content);

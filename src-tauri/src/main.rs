@@ -15,6 +15,7 @@ mod search;
 mod settings;
 mod vault;
 mod graphify;
+mod office;
 
 use tauri::Emitter;
 
@@ -58,14 +59,14 @@ async fn chat(
 
         CRITICAL RULES:
         1. NEVER output raw memory markers like '### memory/'. Use the context naturally.
-        2. To create an image, you MUST start your response with 'GENERATE_IMAGE:' followed by the prompt.
-        3. To create a video animation, you MUST start your response with 'GENERATE_VIDEO:' followed by the prompt.
-        4. SEARCH_WEB: If the user asks for factual information, news, celebrities, release dates, movies, internet culture, or ANY entity you are not 100% familiar with, you MUST write 'SEARCH_WEB: <query>' and NOTHING ELSE. 
-           - If it sounds like a proper noun you don't recognize, SEARCH IT.
-           - Even if you think you know the answer, VERIFY IT on the web.
-           - DO NOT provide a partial answer before searching.
-        5. Once web results are provided, integrate them accurately into a final response.
-        6. Your tone should align with your persona but remain professional and creative.
+        2. GENERATE_IMAGE: To create an image, start with 'GENERATE_IMAGE:' followed by the prompt.
+        3. GENERATE_VIDEO: To create a video, start with 'GENERATE_VIDEO:' followed by the prompt.
+        4. SEARCH_WEB: If you need factual data or current events (news, people, tech), you MUST write 'SEARCH_WEB: <query>' and NOTHING ELSE. Verify everything.
+        5. GENERATE_DOCX: To create a Word document, you MUST output:
+           GENERATE_DOCX: {{ \"filename\": \"name\", \"title\": \"Title\", \"sections\": [{{ \"heading\": \"H1\", \"body\": \"text\" }}] }}
+        6. GENERATE_XLSX: To create an Excel file, you MUST output:
+           GENERATE_XLSX: {{ \"filename\": \"name\", \"sheets\": [{{ \"name\": \"Sheet1\", \"rows\": [[\"Col1\", \"Col2\"], [\"Val1\", \"Val2\"]] }}] }}
+        7. Your tone should align with your persona but remain professional and creative.
 
         Local Memory Context:
         ---
@@ -84,6 +85,8 @@ async fn chat(
     let search_re = regex::Regex::new(r"(?i)SEARCH_WEB:\s*(.*)").unwrap();
     let image_re = regex::Regex::new(r"(?i)GENERATE_IMAGE:\s*(.*)").unwrap();
     let video_re = regex::Regex::new(r"(?i)GENERATE_VIDEO:\s*(.*)").unwrap();
+    let docx_re = regex::Regex::new(r"(?i)GENERATE_DOCX:\s*(\{.*\})").unwrap();
+    let xlsx_re = regex::Regex::new(r"(?i)GENERATE_XLSX:\s*(\{.*\})").unwrap();
 
     if let Some(caps) = search_re.captures(&response) {
         let query = caps.get(1).map_or("", |m| m.as_str().trim());
@@ -102,6 +105,22 @@ async fn chat(
                 Err(e) => {
                     let _ = app.emit("llm-token", format!("\n\n*⚠️ Search failed: {}*\n\n", e));
                 }
+            }
+        }
+    } else if let Some(caps) = docx_re.captures(&response) {
+        let json_str = caps.get(1).map_or("", |m| m.as_str().trim());
+        if let Ok(content) = serde_json::from_str(json_str) {
+            match office::generate_docx(content).await {
+                Ok(filename) => { let _ = app.emit("llm-token", format!("\n\n📄 **Document Word généré :** `{}`\n*Retrouvez-le dans votre dossier documents.*", filename)); },
+                Err(e) => { let _ = app.emit("llm-token", format!("\n\n❌ **Échec Word :** {}", e)); }
+            }
+        }
+    } else if let Some(caps) = xlsx_re.captures(&response) {
+        let json_str = caps.get(1).map_or("", |m| m.as_str().trim());
+        if let Ok(content) = serde_json::from_str(json_str) {
+            match office::generate_xlsx(content).await {
+                Ok(filename) => { let _ = app.emit("llm-token", format!("\n\n📊 **Fichier Excel généré :** `{}`\n*Retrouvez-le dans votre dossier documents.*", filename)); },
+                Err(e) => { let _ = app.emit("llm-token", format!("\n\n❌ **Échec Excel :** {}", e)); }
             }
         }
     } else if let Some(caps) = image_re.captures(&response) {
@@ -222,6 +241,8 @@ fn main() {
             reset_system,
             list_ollama_models,
             list_personas,
+            office::generate_docx,
+            office::generate_xlsx,
             memory::process_calibration,
             vault::list_notes,
             vault::read_note,

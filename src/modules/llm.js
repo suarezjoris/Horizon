@@ -193,6 +193,18 @@ async function send() {
       return;
     }
 
+    if (cmd === 'docx' || cmd === 'word') {
+      addBubble('user', `Generating Word document: ${query}`);
+      messages.push({ role: 'user', content: `GENERATE_DOCX for: ${query}. Use search if needed for factual accuracy.` });
+      // Let the normal send logic handle it from here
+    }
+
+    if (cmd === 'xlsx' || cmd === 'excel') {
+      addBubble('user', `Generating Excel file: ${query}`);
+      messages.push({ role: 'user', content: `GENERATE_XLSX for: ${query}.` });
+      // Let the normal send logic handle it from here
+    }
+
     if (cmd === 'search') {
       if (!query) { addBubble('ai', 'Usage: /search <query>'); return; }
       addBubble('user', `Searching for: ${query}`);
