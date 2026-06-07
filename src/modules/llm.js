@@ -38,6 +38,18 @@ async function refreshSelectors() {
 window.refreshSelectors = refreshSelectors;
 refreshSelectors();
 
+listen('wiki-download-progress', e => {
+    const p = e.payload;
+    const bubbles = document.querySelectorAll('.bubble.ai');
+    const lastBubble = bubbles[bubbles.length - 1];
+    if (lastBubble && (lastBubble.textContent.includes('Synchronisation') || lastBubble.innerHTML.includes('Sync Wikipedia'))) {
+        const mb = (p.bytes_done / 1024 / 1024).toFixed(1);
+        const total = (p.total_bytes / 1024 / 1024).toFixed(1);
+        const pct = p.percentage.toFixed(2);
+        lastBubble.innerHTML = `🌐 **Sync Wikipedia**: ${pct}% (${mb}/${total} Mo)<br><progress value="${p.percentage}" max="100" style="width:100%; height:8px;"></progress>`;
+    }
+});
+
 function addBubble(role, text) {
   const row = document.createElement('div');
   row.className = `bubble-row ${role}`;
@@ -202,6 +214,23 @@ async function send() {
     if (cmd === 'xlsx' || cmd === 'excel') {
       addBubble('user', `Generating Excel file: ${query}`);
       messages.push({ role: 'user', content: `GENERATE_XLSX for: ${query}.` });
+      // Let the normal send logic handle it from here
+    }
+
+    if (cmd === 'sync_wiki' || cmd === 'wiki') {
+      const bubble = addBubble('ai', 'Synchronisation de Wikipedia local... (6 Go)');
+      try {
+        const msg = await invoke('sync_wikipedia');
+        bubble.textContent = msg;
+      } catch (err) {
+        bubble.textContent = `Erreur sync: ${err}`;
+      }
+      return;
+    }
+
+    if (cmd === 'ppt' || cmd === 'pptx' || cmd === 'powerpoint') {
+      addBubble('user', `Generating PowerPoint: ${query}`);
+      messages.push({ role: 'user', content: `GENERATE_PPTX for: ${query}. Use search for depth and accuracy.` });
       // Let the normal send logic handle it from here
     }
 

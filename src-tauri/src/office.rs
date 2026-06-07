@@ -162,6 +162,12 @@ pub async fn generate_pptx(content: PptxContent) -> Result<String, String> {
     
     let mut data = serde_json::to_value(&content).map_err(|e| e.to_string())?;
     data["output_path"] = serde_json::json!(output_path.to_string_lossy());
+    
+    // Check for a user template
+    let template_file = base_path.join("template.pptx");
+    if template_file.exists() {
+        data["template_path"] = serde_json::json!(template_file.to_string_lossy());
+    }
 
     let home = dirs::home_dir().ok_or("Could not find home directory")?;
     let project_root = home.join("Projects/Horizon");

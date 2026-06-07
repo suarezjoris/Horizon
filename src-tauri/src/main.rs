@@ -16,6 +16,7 @@ mod settings;
 mod vault;
 mod graphify;
 mod office;
+mod wikipedia;
 
 use tauri::Emitter;
 
@@ -41,7 +42,14 @@ async fn chat(
         .to_string();
 
     // RAG: pull the most relevant vault chunks using emergent brain logic
-    let context = memory::get_context(&user_msg).await;
+    let mut context = memory::get_context(&user_msg).await;
+
+    // If context is still empty or short, try Local Wikipedia
+    if context.len() < 300 {
+        if let Some(wiki_content) = wikipedia::search_wikipedia(&user_msg) {
+            context.push_str(&format!("\n\n### [Local Wikipedia Knowledge]\n{}", wiki_content));
+        }
+    }
 
     // Load Persona / System Prompt
     let system_base = persona.and_then(|name| {
@@ -60,11 +68,13 @@ async fn chat(
         CRITICAL RULES:
         1. NEVER output raw memory markers like '### memory/'. Use the context naturally.
         2. LANGUAGE: Always respond in the SAME LANGUAGE as the user's request.
-        3. ACCURACY: Do NOT speculate or invent reviews, ratings, or reception for unreleased media or future events. If a date is in the future, state that it is upcoming.
-        4. GENERATE_IMAGE: To create an image, start with 'GENERATE_IMAGE:' followed by the prompt.
-        5. GENERATE_VIDEO: To create a video, start with 'GENERATE_VIDEO:' followed by the prompt.
-        6. SEARCH_WEB: If you need factual data, news, or any entity you are not 100% familiar with, you MUST write 'SEARCH_WEB: <query>' and NOTHING ELSE. Perform DEEP research (dates, numbers, budgets, cast).
-        7. GENERATE_DOCX: To create a professional Word document, output:
+        3. ACCURACY: Do NOT speculate, invent reviews, ratings, or reception for unreleased media or future events. If a date is in the future, state it is upcoming. Never invent sequels or 'in development' status unless explicitly found in search results.
+        4. LOCAL KNOWLEDGE PRIORITY: If the information requested is available in the 'Local Memory Context' section below, use it to answer directly. DO NOT trigger a SEARCH_WEB if you can find the answer locally.
+        5. AUTOMATION PROTOCOL: When asked to generate a document (Word, Excel, PowerPoint) or perform a search, output ONLY the required tag (GENERATE_DOCX, GENERATE_PPTX, or SEARCH_WEB). No preambles, no explanations. 
+        6. GENERATE_IMAGE: To create an image, start with 'GENERATE_IMAGE:' followed by the prompt.
+        7. GENERATE_VIDEO: To create a video, start with 'GENERATE_VIDEO:' followed by the prompt.
+        8. SEARCH_WEB: If (and only if) you need factual data, news, or any entity that is NOT present in the 'Local Memory Context', you MUST write 'SEARCH_WEB: <query>' and NOTHING ELSE. Perform DEEP research.
+        8. GENERATE_DOCX: To create a professional Word document, output:
            GENERATE_DOCX: {{
              \"filename\": \"name\",
              \"title\": \"Main Title\",
@@ -75,11 +85,11 @@ async fn chat(
                {{ \"type\": \"list\", \"items\": [\"item 1\", \"item 2\"] }}
              ]
            }}
-        8. GENERATE_XLSX: To create an Excel file, you MUST output:
+        9. GENERATE_XLSX: To create an Excel file, you MUST output:
            GENERATE_XLSX: {{ \"filename\": \"name\", \"sheets\": [{{ \"name\": \"Sheet1\", \"rows\": [[\"Col1\", \"Col2\"], [\"Val1\", \"Val2\"]] }}] }}
-        9. GENERATE_PPTX: To create a PowerPoint presentation, you MUST output:
+        10. GENERATE_PPTX: To create a PowerPoint presentation, you MUST output:
            GENERATE_PPTX: {{ \"filename\": \"name\", \"title\": \"Main Title\", \"slides\": [{{ \"title\": \"Slide 1\", \"intro\": \"Summary\", \"bullets\": [\"fact 1\", \"fact 2\"] }}] }}
-        10. Your tone should align with your persona but remain professional and creative.
+        11. Your tone should align with your persona but remain professional and creative.
 
         Local Memory Context:
         ---
@@ -138,7 +148,7 @@ async fn chat(
                         current_messages.push(serde_json::json!({"role": "assistant", "content": response}));
                         current_messages.push(serde_json::json!({
                             "role": "system", 
-                            "content": format!("Success: PowerPoint at {}. Now, inform the user in their language that '{}' is ready.", path, filename)
+                            "content": format!("Success: PowerPoint at {}. Now, BRIEFLY inform the user in their language that '{}' is ready. Do NOT repeat the slide content or output any JSON.", path, filename)
                         }));
                         continue;
                     },
@@ -156,7 +166,7 @@ async fn chat(
                         current_messages.push(serde_json::json!({"role": "assistant", "content": response}));
                         current_messages.push(serde_json::json!({
                             "role": "system", 
-                            "content": format!("Success: document generated at {}. Now, simply tell the user (in their language) that the document '{}' is ready. Do NOT output any more tags or JSON.", path, filename)
+                            "content": format!("Success: document generated at {}. Now, BRIEFLY inform the user in their language that '{}' is ready. Do NOT output JSON or technical tags.", path, filename)
                         }));
                         continue;
                     },
@@ -319,6 +329,7 @@ fn main() {
             list_ollama_models,
             list_personas,
             open_docs_folder,
+            wikipedia::sync_wikipedia,
             office::generate_docx,
             office::generate_xlsx,
             office::generate_pptx,

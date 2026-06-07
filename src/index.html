@@ -262,21 +262,24 @@
     <h4 style="color: var(--text-color); margin-bottom: 5px;">💬 Chat Commands</h4>
     <ul style="margin-top: 5px; line-height: 1.5; font-size: 0.95em;">
       <li><strong style="color: var(--accent-gold);">/clear</strong> : Clear the current chat history.</li>
-      <li><strong style="color: var(--accent-gold);">/memory</strong> : View the RAG chunks retrieved for the last message.</li>
+      <li><strong style="color: var(--accent-gold);">/docx &lt;topic&gt;</strong> : Create a professional Word document.</li>
+      <li><strong style="color: var(--accent-gold);">/ppt &lt;topic&gt;</strong> : Create a Claymorphic PowerPoint presentation.</li>
+      <li><strong style="color: var(--accent-gold);">/xlsx &lt;topic&gt;</strong> : Create an Excel spreadsheet.</li>
       <li><strong style="color: var(--accent-gold);">/search &lt;query&gt;</strong> : Manually search the Second Brain vault.</li>
-      <li><strong style="color: var(--accent-gold);">/note &lt;text&gt;</strong> : Quickly save a timestamped note to the vault.</li>
       <li><strong style="color: var(--accent-gold);">/reindex</strong> : Rebuild the RAG vector index (ChromaDB).</li>
+      <li><strong style="color: var(--accent-gold);">/sync_wiki</strong> : Download & Sync local Wikipedia for offline knowledge.</li>
       <li><strong style="color: var(--accent-gold);">/consolidate</strong> : Ask the AI to refactor and link your Second Brain notes.</li>
-      <li><strong style="color: var(--accent-gold);">/file &lt;path&gt;</strong> : Load a file into context (or drag & drop).</li>
+      <li><strong style="color: var(--accent-gold);">/file &lt;path&gt;</strong> : Load any file (Code, PDF, Docx, Pptx, Xlsx) into context.</li>
       <li><strong style="color: var(--accent-gold);">/paste</strong> : Paste an image from the clipboard (or press F2).</li>
     </ul>
 
     <h4 style="color: var(--text-color); margin-bottom: 5px;">⚡ Auto-Triggers (LLM side)</h4>
     <p style="margin-top: 5px; font-size: 0.9em;">Horizon automatically invokes these capabilities when it detects certain keywords in its own responses:</p>
     <ul style="margin-top: 5px; line-height: 1.5; font-size: 0.95em;">
-      <li><strong>SEARCH_WEB: &lt;query&gt;</strong> -> Performs internet search and answers.</li>
-      <li><strong>GENERATE_IMAGE: &lt;prompt&gt;</strong> -> Switches to Image tab and starts rendering.</li>
-      <li><strong>GENERATE_VIDEO: &lt;prompt&gt;</strong> -> Switches to Cinema tab and starts animating.</li>
+      <li><strong>SEARCH_WEB</strong> -> Deep Research via DuckDuckGo.</li>
+      <li><strong>GENERATE_IMAGE</strong> -> Image generation via ComfyUI.</li>
+      <li><strong>GENERATE_VIDEO</strong> -> Video animation via Cinema engine.</li>
+      <li><strong>GENERATE_DOCX / PPTX</strong> -> Professional document creation.</li>
     </ul>
 
     <div style="text-align: right; margin-top: 20px;">

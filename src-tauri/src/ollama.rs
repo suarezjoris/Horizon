@@ -62,19 +62,40 @@ pub async fn chat_stream(
 
     let mut full = String::new();
     let mut byte_stream = response.bytes_stream();
-    let mut buf: Vec<u8> = Vec::new();
+    let mut line_buf: Vec<u8> = Vec::new();
+    let mut utf8_buf: Vec<u8> = Vec::new();
 
     while let Some(chunk) = byte_stream.next().await {
-        buf.extend_from_slice(&chunk.map_err(|e| e.to_string())?);
+        line_buf.extend_from_slice(&chunk.map_err(|e| e.to_string())?);
         
-        while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
-            let line: Vec<u8> = buf.drain(..=pos).collect();
+        while let Some(pos) = line_buf.iter().position(|&b| b == b'\n') {
+            let line = line_buf.drain(..=pos).collect::<Vec<u8>>();
             if let Ok(c) = serde_json::from_slice::<ChatChunk>(&line) {
                 if !c.done {
-                    let content = c.message.content;
-                    full.push_str(&content);
-                    if !silent {
-                        let _ = app.emit("llm-token", &content);
+                    let token_bytes = c.message.content.as_bytes();
+                    utf8_buf.extend_from_slice(token_bytes);
+                    
+                    // Only emit/append what is currently valid UTF-8
+                    match String::from_utf8(utf8_buf.clone()) {
+                        Ok(valid_str) => {
+                            full.push_str(&valid_str);
+                            if !silent {
+                                let _ = app.emit("llm-token", &valid_str);
+                            }
+                            utf8_buf.clear();
+                        }
+                        Err(e) => {
+                            // If invalid, keep bytes in buffer and wait for more (might be mid-character)
+                            let valid_up_to = e.utf8_error().valid_up_to();
+                            if valid_up_to > 0 {
+                                let valid_part = String::from_utf8_lossy(&utf8_buf[..valid_up_to]).into_owned();
+                                full.push_str(&valid_part);
+                                if !silent {
+                                    let _ = app.emit("llm-token", &valid_part);
+                                }
+                                utf8_buf.drain(..valid_up_to);
+                            }
+                        }
                     }
                 }
             }
