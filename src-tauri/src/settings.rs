@@ -2,6 +2,40 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSettings {
+    pub archivist_enabled: bool,
+    pub vanguard_enabled: bool,
+    pub antenna_enabled: bool,
+    /// Bearer token required for Antenna HTTP requests
+    pub antenna_token: String,
+    pub antenna_port: u16,
+    /// Minutes between Vanguard RSS scans
+    pub vanguard_interval_minutes: u64,
+    /// Model used by background agents (lighter than main LLM)
+    pub light_model: String,
+    /// RSS URLs for Vanguard to monitor
+    pub vanguard_feeds: Vec<String>,
+}
+
+impl Default for AgentSettings {
+    fn default() -> Self {
+        Self {
+            archivist_enabled: false,
+            vanguard_enabled: false,
+            antenna_enabled: false,
+            antenna_token: "changeme".to_string(),
+            antenna_port: 8374,
+            vanguard_interval_minutes: 30,
+            light_model: "qwen2.5:7b".to_string(),
+            vanguard_feeds: vec![
+                "https://news.ycombinator.com/rss".to_string(),
+                "https://feeds.feedburner.com/TheHackersNews".to_string(),
+            ],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub vault_path: String,
     pub llm_model: String,
@@ -9,6 +43,7 @@ pub struct Settings {
     pub comfyui_path: String,
     pub embeddings_path: String,
     pub image_rating: String,
+    pub agents: AgentSettings,
 }
 
 impl Default for Settings {
@@ -22,6 +57,7 @@ impl Default for Settings {
             comfyui_path: home.join("Projects/Horizon/ComfyUI/main.py").to_string_lossy().into_owned(),
             embeddings_path: data.join("horizon/embeddings.bin").to_string_lossy().into_owned(),
             image_rating: "rating_safe".to_string(),
+            agents: AgentSettings::default(),
         }
     }
 }
@@ -53,4 +89,20 @@ pub fn get_settings() -> Settings {
 #[tauri::command]
 pub fn save_settings(settings: Settings) -> Result<(), String> {
     persist(&settings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_agent_settings_defaults() {
+        let s = Settings::default();
+        assert_eq!(s.agents.antenna_port, 8374);
+        assert!(!s.agents.archivist_enabled);
+        assert!(!s.agents.vanguard_enabled);
+        assert!(!s.agents.antenna_enabled);
+        assert_eq!(s.agents.vanguard_interval_minutes, 30);
+        assert!(!s.agents.light_model.is_empty());
+    }
 }
