@@ -20,6 +20,7 @@ mod wikipedia;
 mod armata;
 mod vram_queue;
 mod archivist;
+mod vanguard;
 
 use tauri::Emitter;
 
