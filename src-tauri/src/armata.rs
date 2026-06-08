@@ -1,87 +1,211 @@
-use std::fs;
-use reqwest;
+use tauri::{AppHandle, Emitter};
+use crate::{settings, ollama};
 
-// --- ARMATA COMMAND ROUTER ---
-#[tauri::command]
-pub async fn execute_armata_command(cmd: String) -> Result<String, String> {
-    let command = cmd.to_lowercase();
-    
-    // Agent: ARCHIVIST
-    if command.contains("sort") || command.contains("clean") || command.contains("archive") {
-        return archivist_run().await;
+#[derive(Debug, PartialEq)]
+pub enum CommandKind {
+    Archivist,
+    Vanguard,
+    OsTool,
+    LlmFallback,
+}
+
+/// Classify a raw command string without calling any external service.
+pub fn classify(cmd: &str) -> CommandKind {
+    let lower = cmd.to_lowercase();
+
+    if lower.split_whitespace().any(|w| matches!(w, "sort" | "clean" | "archive" | "move" | "file" | "tidy")) {
+        return CommandKind::Archivist;
     }
-    
-    // Agent: VANGUARD
-    if command.contains("scan") || command.contains("news") || command.contains("intel") {
-        return vanguard_run().await;
+    if lower.split_whitespace().any(|w| matches!(w, "scan" | "news" | "intel" | "rss" | "fetch" | "scrape")) {
+        return CommandKind::Vanguard;
+    }
+    if lower.split_whitespace().any(|w| matches!(w, "open" | "launch" | "start" | "volume" | "status" | "close")) {
+        return CommandKind::OsTool;
     }
 
-    // Agent: FORGE (Placeholder for direct video triggers)
-    if command.contains("render") || command.contains("video") {
-        return Ok("FORGE: Awaiting specific blueprint in Cinema module.".into());
-    }
+    CommandKind::LlmFallback
+}
 
-    // GENERAL (Fallback to LLM for reasoning)
-    let s = crate::settings::load();
-    let prompt = format!("You are ARMATA, an Agentic OS. The user issued command: '{}'. Acknowledge the command strictly and concisely like a military AI terminal. No pleasantries.", cmd);
-    
-    let messages = vec![serde_json::json!({"role": "user", "content": prompt})];
-    match crate::ollama::chat_once(messages, &s.llm_model).await {
-        Ok(res) => Ok(format!("GENERAL: {}", res)),
-        Err(e) => Err(format!("GENERAL COMMUNICATION FAILURE: {}", e)),
+fn emit_log(app: &AppHandle, msg: &str) {
+    let _ = app.emit("armata-terminal-log", msg);
+}
+
+/// Core router — used by both the Tauri command and the Antenna bridge.
+pub async fn route_command(cmd: String) -> Result<String, String> {
+    match classify(&cmd) {
+        CommandKind::Archivist => archivist_run_once().await,
+        CommandKind::Vanguard => vanguard_run_once().await,
+        CommandKind::OsTool => os_tool_run(&cmd),
+        CommandKind::LlmFallback => llm_run(&cmd).await,
     }
 }
 
 #[tauri::command]
-pub async fn toggle_agent(agent: String, state: bool) -> Result<String, String> {
-    let status = if state { "ONLINE [Monitoring]" } else { "OFFLINE [Standby]" };
-    Ok(format!("Agent '{}' shifted to {}", agent.to_uppercase(), status))
+pub async fn execute_armata_command(app: AppHandle, cmd: String) -> Result<String, String> {
+    emit_log(&app, &format!("> {}", cmd));
+    let result = route_command(cmd).await?;
+    emit_log(&app, &result);
+    Ok(result)
 }
 
-// --- AGENT IMPLEMENTATIONS ---
+#[tauri::command]
+pub async fn toggle_agent(app: AppHandle, agent: String, enabled: bool) -> Result<String, String> {
+    let mut s = settings::load();
+    let status_str = if enabled { "ONLINE" } else { "OFFLINE" };
 
-// The Archivist: Safely sorts basic files from Downloads to a Horizon Vault
-async fn archivist_run() -> Result<String, String> {
-    let home = dirs::home_dir().ok_or("CRITICAL: Cannot locate user home directory.")?;
+    match agent.as_str() {
+        "archivist" => s.agents.archivist_enabled = enabled,
+        "vanguard" => s.agents.vanguard_enabled = enabled,
+        "antenna" => s.agents.antenna_enabled = enabled,
+        _ => return Err(format!("Unknown agent: {}", agent)),
+    }
+
+    settings::save_settings(s)?;
+
+    let msg = format!("Agent {} → {}", agent.to_uppercase(), status_str);
+    let _ = app.emit("armata-agent-status", serde_json::json!({
+        "agent": agent,
+        "status": if enabled { "online" } else { "offline" },
+        "message": msg.clone()
+    }));
+
+    Ok(msg)
+}
+
+#[tauri::command]
+pub fn get_armata_status() -> serde_json::Value {
+    let s = settings::load();
+    serde_json::json!({
+        "archivist": s.agents.archivist_enabled,
+        "vanguard": s.agents.vanguard_enabled,
+        "antenna": s.agents.antenna_enabled,
+        "antenna_port": s.agents.antenna_port,
+        "vanguard_interval": s.agents.vanguard_interval_minutes,
+        "light_model": s.agents.light_model,
+    })
+}
+
+// --- Agent one-shot runners (called from route_command) ---
+
+async fn archivist_run_once() -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("Cannot locate home directory")?;
     let downloads = home.join("Downloads");
-    let vault_sorted = home.join("Documents/Horizon_Vault/Sorted_Intel");
-    
-    fs::create_dir_all(&vault_sorted).map_err(|e| format!("ARCHIVIST IO ERROR: {}", e))?;
+    let vault = home.join("Documents/Horizon_Vault/Sorted_Intel");
+    std::fs::create_dir_all(&vault).map_err(|e| e.to_string())?;
 
-    let mut moved_count = 0;
-    
-    if let Ok(entries) = fs::read_dir(&downloads) {
+    let mut count = 0;
+    if let Ok(entries) = std::fs::read_dir(&downloads) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() {
-                let ext = path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
-                // We safely target only media and documents
-                if ext == "pdf" || ext == "jpg" || ext == "png" || ext == "md" || ext == "txt" {
-                    let dest = vault_sorted.join(path.file_name().unwrap());
-                    if fs::rename(&path, &dest).is_ok() { 
-                        moved_count += 1; 
-                    }
+            if !path.is_file() { continue; }
+            let filename = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            if let Some(cat) = crate::archivist::categorize_file(&filename) {
+                let dest_dir = vault.join(cat);
+                std::fs::create_dir_all(&dest_dir).ok();
+                let dest = dest_dir.join(&filename);
+                if !dest.exists() {
+                    if std::fs::rename(&path, &dest).is_ok() { count += 1; }
                 }
             }
         }
     }
-    
-    Ok(format!("ARCHIVIST: Sweep complete. Secured {} files into Vault/Sorted_Intel.", moved_count))
+    Ok(format!("ARCHIVIST: Filed {} item(s)", count))
 }
 
-// The Vanguard: Fetches raw network data
-async fn vanguard_run() -> Result<String, String> {
-    // For now, scans HackerNews RSS as a proof of network capability
-    let resp = reqwest::get("https://news.ycombinator.com/rss").await.map_err(|e| format!("VANGUARD NETWORK ERROR: {}", e))?;
-    let text = resp.text().await.map_err(|e| format!("VANGUARD PARSE ERROR: {}", e))?;
-
-    // Extracting basic intel size as proof
-    let kilobytes = text.len() / 1024;
-    Ok(format!("VANGUARD: Network scan complete. Intercepted {} KB of raw external intelligence.", kilobytes))
+async fn vanguard_run_once() -> Result<String, String> {
+    let s = settings::load();
+    let mut intercepted = 0usize;
+    for feed_url in &s.agents.vanguard_feeds {
+        if let Ok(resp) = reqwest::get(feed_url).await {
+            if let Ok(text) = resp.text().await {
+                intercepted += crate::vanguard::parse_rss_items(&text).len();
+            }
+        }
+    }
+    Ok(format!("VANGUARD: Scanned {} RSS items across {} feeds", intercepted, s.agents.vanguard_feeds.len()))
 }
 
-// --- ANTENNA BRIDGE ENTRY POINT ---
-// Stub for Task 7 (full implementation pending)
-pub async fn route_command(cmd: String) -> Result<String, String> {
-    Ok(format!("ARMATA: {}", cmd))
+fn os_tool_run(cmd: &str) -> Result<String, String> {
+    let lower = cmd.to_lowercase();
+    let words: Vec<&str> = lower.split_whitespace().collect();
+
+    if words.contains(&"status") {
+        let s = settings::load();
+        return Ok(format!(
+            "ARMATA STATUS\nArchivist: {}\nVanguard: {}\nAntenna: {}:{}",
+            if s.agents.archivist_enabled { "ONLINE" } else { "OFFLINE" },
+            if s.agents.vanguard_enabled { "ONLINE" } else { "OFFLINE" },
+            if s.agents.antenna_enabled { "ONLINE" } else { "OFFLINE" },
+            s.agents.antenna_port,
+        ));
+    }
+
+    if let Some(pos) = words.iter().position(|&w| w == "open" || w == "launch" || w == "start") {
+        if let Some(app_name) = words.get(pos + 1) {
+            std::process::Command::new(app_name)
+                .spawn()
+                .map(|_| format!("Launched: {}", app_name))
+                .map_err(|e| format!("Failed to launch '{}': {}", app_name, e))
+        } else {
+            Err("Specify an app to open".to_string())
+        }
+    } else if words.contains(&"volume") {
+        if words.contains(&"up") {
+            let _ = std::process::Command::new("pactl")
+                .args(["set-sink-volume", "@DEFAULT_SINK@", "+5%"])
+                .status();
+            Ok("Volume +5%".to_string())
+        } else if words.contains(&"down") {
+            let _ = std::process::Command::new("pactl")
+                .args(["set-sink-volume", "@DEFAULT_SINK@", "-5%"])
+                .status();
+            Ok("Volume -5%".to_string())
+        } else {
+            Err("volume up | volume down".to_string())
+        }
+    } else {
+        Err(format!("Unknown OS command: {}", cmd))
+    }
+}
+
+async fn llm_run(cmd: &str) -> Result<String, String> {
+    let s = settings::load();
+    let prompt = format!(
+        "You are ARMATA, the command core of an Agentic OS. Reply in 1-3 sentences, terminal style. No markdown. Command: {}",
+        cmd
+    );
+    let msgs = vec![serde_json::json!({"role": "user", "content": prompt})];
+    let resp = ollama::chat_once(msgs, &s.llm_model).await?;
+    Ok(format!("GENERAL: {}", resp))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_classify_file_command() {
+        assert_eq!(classify("sort downloads"), CommandKind::Archivist);
+        assert_eq!(classify("clean my files"), CommandKind::Archivist);
+        assert_eq!(classify("archive pdfs"), CommandKind::Archivist);
+    }
+
+    #[test]
+    fn test_classify_vanguard_command() {
+        assert_eq!(classify("scan news"), CommandKind::Vanguard);
+        assert_eq!(classify("get intel"), CommandKind::Vanguard);
+    }
+
+    #[test]
+    fn test_classify_os_command() {
+        assert_eq!(classify("open spotify"), CommandKind::OsTool);
+        assert_eq!(classify("launch firefox"), CommandKind::OsTool);
+        assert_eq!(classify("volume up"), CommandKind::OsTool);
+        assert_eq!(classify("status"), CommandKind::OsTool);
+    }
+
+    #[test]
+    fn test_classify_llm_fallback() {
+        assert_eq!(classify("what is the meaning of life"), CommandKind::LlmFallback);
+    }
 }
