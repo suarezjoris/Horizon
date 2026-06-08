@@ -8,10 +8,10 @@ def search(query):
         if not results:
             return "No results found on the web."
         
-        output = "Results from the web:\n\n"
+        output = ["Results from the web:\n"]
         for i, res in enumerate(results):
-            output += f"{i+1}. {res['title']}\n   {res['body']}\n\n"
-        return output
+            output.append(f"{i+1}. {res['title']}\n   {res['body']}")
+        return "\n\n".join(output) + "\n"
     except Exception as e:
         return f"Search error: {str(e)}"
 

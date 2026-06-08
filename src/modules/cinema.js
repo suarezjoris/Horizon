@@ -4,7 +4,6 @@
     
     const videoPrompt = document.getElementById('video-prompt');
     const videoDuration = document.getElementById('video-duration');
-    const durationVal = document.getElementById('duration-val');
     const videoQuality = document.getElementById('video-quality');
     const videoImgBtn = document.getElementById('video-img-btn');
     const videoImgName = document.getElementById('video-img-name');
@@ -34,11 +33,12 @@
     let selectedImagePath = null;
     let cancelled = false;
 
-    // Update duration display
-    videoDuration.oninput = () => {
-        durationVal.textContent = videoDuration.value + 's';
-        updateEstimation();
-    };
+    // Update duration estimation
+    if (videoDuration) {
+        videoDuration.oninput = () => {
+            updateEstimation();
+        };
+    }
 
     // FPS display
     videoFps.oninput = () => { fpsVal.textContent = videoFps.value; };

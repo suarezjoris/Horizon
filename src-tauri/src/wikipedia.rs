@@ -111,9 +111,12 @@ pub fn search_wikipedia(query: &str) -> Option<String> {
     None
 }
 
+lazy_static::lazy_static! {
+    static ref HTML_RE: regex::Regex = regex::Regex::new(r"<[^>]*>").unwrap();
+}
+
 fn strip_html(html: &str) -> String {
-    let re = regex::Regex::new(r"<[^>]*>").unwrap();
-    let text = re.replace_all(html, "");
+    let text = HTML_RE.replace_all(html, "");
     
     // Comprehensive entity and unicode cleanup
     text.replace("&nbsp;", " ")

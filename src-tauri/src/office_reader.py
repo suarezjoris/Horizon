@@ -2,7 +2,6 @@ import sys
 import os
 import docx
 from pptx import Presentation
-import pandas as pd
 
 def extract_text(path):
     ext = os.path.splitext(path)[1].lower()
@@ -13,16 +12,27 @@ def extract_text(path):
     
     elif ext == ".pptx":
         prs = Presentation(path)
-        text_runs = []
-        for slide in prs.slides:
-            for shape in slide.shapes:
-                if hasattr(shape, "text"):
-                    text_runs.append(shape.text)
+        text_runs = [
+            shape.text
+            for slide in prs.slides
+            for shape in slide.shapes
+            if hasattr(shape, "text")
+        ]
         return "\n".join(text_runs)
     
-    elif ext == ".xlsx" or ext == ".xls":
-        df = pd.read_excel(path)
-        return df.to_string()
+    elif ext in [".xlsx", ".xls"]:
+        import openpyxl
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        text_runs = []
+        for sheet in wb.worksheets:
+            text_runs.append(f"--- Sheet: {sheet.title} ---")
+            for row in sheet.iter_rows(values_only=True):
+                # Filter out None values and join row data
+                row_data = [str(cell) for cell in row if cell is not None]
+                if row_data:
+                    text_runs.append(" | ".join(row_data))
+        wb.close()
+        return "\n".join(text_runs)
     
     return ""
 

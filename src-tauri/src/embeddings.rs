@@ -26,18 +26,24 @@ pub fn chunk_text(text: &str, size: usize, overlap: usize) -> Vec<String> {
 }
 
 pub fn search<'a>(index: &'a [Entry], query: &[f32], k: usize) -> Vec<&'a Entry> {
+    let ma: f32 = query.iter().map(|x| x * x).sum::<f32>().sqrt();
+    
     let mut scored: Vec<(f32, &Entry)> = index.iter()
-        .map(|e| (cosine_similarity(query, &e.vector), e))
+        .map(|e| (cosine_similarity_precalc(query, &e.vector, ma), e))
         .collect();
     scored.sort_by(|a, b| b.0.total_cmp(&a.0));
     scored.into_iter().take(k).map(|(_, e)| e).collect()
 }
 
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+fn cosine_similarity_precalc(a: &[f32], b: &[f32], ma: f32) -> f32 {
     let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let ma: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
     let mb: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
     if ma == 0.0 || mb == 0.0 { 0.0 } else { dot / (ma * mb) }
+}
+
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    let ma: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    cosine_similarity_precalc(a, b, ma)
 }
 
 pub fn save_index(index: &[Entry], path: &str) {

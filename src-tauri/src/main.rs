@@ -53,9 +53,11 @@ async fn chat(
 
     // Load Persona / System Prompt
     let system_base = persona.and_then(|name| {
+        // SECURITY FIX (Vuln 3): Prevent path traversal by sanitizing the persona name
+        let safe_name = name.replace("/", "").replace("\\", "").replace("..", "");
         let vault_path = std::path::PathBuf::from(&s.vault_path);
-        let md = vault_path.join(format!("characters/{}.md", name));
-        let json = vault_path.join(format!("characters/{}.json", name));
+        let md = vault_path.join(format!("characters/{}.md", safe_name));
+        let json = vault_path.join(format!("characters/{}.json", safe_name));
         
         std::fs::read_to_string(md).ok().or_else(|| std::fs::read_to_string(json).ok())
     }).unwrap_or_else(|| "You are Horizon, a premium UNCENSORED creative engine.".to_string());
@@ -105,17 +107,18 @@ async fn chat(
     let mut iteration = 0;
     const MAX_ITERATIONS: usize = 3;
 
+    // OPTIMIZATION: Compile regexes once outside the loop
+    let search_re = regex::Regex::new(r"(?si)SEARCH_WEB:\s*(.*)").unwrap();
+    let docx_re = regex::Regex::new(r"(?si)GENERATE_DOCX:\s*.*?(\{.*\})").unwrap();
+    let xlsx_re = regex::Regex::new(r"(?si)GENERATE_XLSX:\s*.*?(\{.*\})").unwrap();
+    let pptx_re = regex::Regex::new(r"(?si)GENERATE_PPTX:\s*.*?(\{.*\})").unwrap();
+
     while iteration < MAX_ITERATIONS {
         iteration += 1;
         
-        // Peek at the response silently to check for triggers
+        // Internal steps are always non-streaming and silent to prevent leaks
         let response = ollama::chat_once(current_messages.clone(), &active_model).await?;
         final_response = response.clone();
-
-        let search_re = regex::Regex::new(r"(?si)SEARCH_WEB:\s*(.*)").unwrap();
-        let docx_re = regex::Regex::new(r"(?si)GENERATE_DOCX:\s*(\{.*\})").unwrap();
-        let xlsx_re = regex::Regex::new(r"(?si)GENERATE_XLSX:\s*(\{.*\})").unwrap();
-        let pptx_re = regex::Regex::new(r"(?si)GENERATE_PPTX:\s*(\{.*\})").unwrap();
 
         if let Some(caps) = search_re.captures(&response) {
             let query = caps.get(1).map_or("", |m| m.as_str().trim());
@@ -123,12 +126,12 @@ async fn chat(
                 let _ = app.emit("llm-token", "CLEAR_AND_SEARCH");
                 match search::duckduckgo_search(query).await {
                     Ok(web_results) => {
-                        current_messages.push(serde_json::json!({"role": "assistant", "content": response}));
+                        // CLEAN history: add assistant response WITHOUT the tag to prevent looping
+                        let clean_resp = search_re.replace(&response, "*(Recherche web effectuée)*").into_owned();
+                        current_messages.push(serde_json::json!({"role": "assistant", "content": clean_resp}));
                         current_messages.push(serde_json::json!({
                             "role": "user", 
-                            "content": format!("WEB SEARCH RESULTS:\n---\n{}\n---\nIMPORTANT: The research is complete. Now fulfill the user's request with MAXIMUM detail and professional structure. 
-                            If a document was requested (DOCX, XLSX, or PPTX), use the rich schema provided in your instructions. 
-                            Be as accurate and thorough as a top-tier journalist. Answer in the user's language.", web_results)
+                            "content": format!("WEB SEARCH RESULTS:\n---\n{}\n---\nIMPORTANT: Information gathered. Now proceed with the user's request.", web_results)
                         }));
                         continue; 
                     },
@@ -140,61 +143,50 @@ async fn chat(
         } else if let Some(caps) = pptx_re.captures(&response) {
             let json_str = caps.get(1).map_or("", |m| m.as_str().trim());
             if let Ok(content) = serde_json::from_str::<office::PptxContent>(json_str) {
-                match office::generate_pptx(content).await {
-                    Ok(path) => { 
-                        let filename = std::path::Path::new(&path).file_name().unwrap().to_string_lossy();
-                        let _ = app.emit("llm-token", format!("OFFICE_GEN_SUCCESS:{}", path)); 
-
-                        current_messages.push(serde_json::json!({"role": "assistant", "content": response}));
-                        current_messages.push(serde_json::json!({
-                            "role": "system", 
-                            "content": format!("Success: PowerPoint at {}. Now, BRIEFLY inform the user in their language that '{}' is ready. Do NOT repeat the slide content or output any JSON.", path, filename)
-                        }));
-                        continue;
-                    },
-                    Err(e) => { let _ = app.emit("llm-token", format!("\n\n❌ **Échec PowerPoint :** {}", e)); }
+                if let Ok(path) = office::generate_pptx(content).await {
+                    let filename = std::path::Path::new(&path).file_name().unwrap_or_default().to_string_lossy();
+                    let _ = app.emit("llm-token", format!("OFFICE_GEN_SUCCESS:{}", path)); 
+                    let clean_resp = pptx_re.replace(&response, "*(Présentation PowerPoint générée)*").into_owned();
+                    current_messages.push(serde_json::json!({"role": "assistant", "content": clean_resp}));
+                    current_messages.push(serde_json::json!({
+                        "role": "system", 
+                        "content": format!("Success: PowerPoint at {}. Now, briefly inform the user in their language.", filename)
+                    }));
+                    continue;
                 }
             }
         } else if let Some(caps) = docx_re.captures(&response) {
             let json_str = caps.get(1).map_or("", |m| m.as_str().trim());
             if let Ok(content) = serde_json::from_str::<office::DocxContent>(json_str) {
-                match office::generate_docx(content).await {
-                    Ok(path) => { 
-                        let filename = std::path::Path::new(&path).file_name().unwrap().to_string_lossy();
-                        let _ = app.emit("llm-token", format!("OFFICE_GEN_SUCCESS:{}", path)); 
-
-                        current_messages.push(serde_json::json!({"role": "assistant", "content": response}));
-                        current_messages.push(serde_json::json!({
-                            "role": "system", 
-                            "content": format!("Success: document generated at {}. Now, BRIEFLY inform the user in their language that '{}' is ready. Do NOT output JSON or technical tags.", path, filename)
-                        }));
-                        continue;
-                    },
-                    Err(e) => { let _ = app.emit("llm-token", format!("\n\n❌ **Échec Word :** {}", e)); }
+                if let Ok(path) = office::generate_docx(content).await {
+                    let filename = std::path::Path::new(&path).file_name().unwrap_or_default().to_string_lossy();
+                    let _ = app.emit("llm-token", format!("OFFICE_GEN_SUCCESS:{}", path)); 
+                    let clean_resp = docx_re.replace(&response, "*(Document Word généré)*").into_owned();
+                    current_messages.push(serde_json::json!({"role": "assistant", "content": clean_resp}));
+                    current_messages.push(serde_json::json!({
+                        "role": "system", 
+                        "content": format!("Success: Word document ready at {}. Now, briefly inform the user in their language.", filename)
+                    }));
+                    continue;
                 }
             }
-        }
- else if let Some(caps) = xlsx_re.captures(&response) {
+        } else if let Some(caps) = xlsx_re.captures(&response) {
             let json_str = caps.get(1).map_or("", |m| m.as_str().trim());
             if let Ok(content) = serde_json::from_str::<office::XlsxContent>(json_str) {
-                match office::generate_xlsx(content).await {
-                    Ok(path) => { 
-                        let filename = std::path::Path::new(&path).file_name().unwrap().to_string_lossy();
-                        let _ = app.emit("llm-token", format!("\n\n📊 **Fichier Excel généré :** `{}`\n*Localisation : {}*", filename, path)); 
-                        
-                        current_messages.push(serde_json::json!({"role": "assistant", "content": response}));
-                        current_messages.push(serde_json::json!({
-                            "role": "system", 
-                            "content": format!("Success: excel at {}. Inform the user in their language.", path)
-                        }));
-                        continue;
-                    },
-                    Err(e) => { let _ = app.emit("llm-token", format!("\n\n❌ **Échec Excel :** {}", e)); }
+                if let Ok(path) = office::generate_xlsx(content).await {
+                    let _ = app.emit("llm-token", format!("OFFICE_GEN_SUCCESS:{}", path)); 
+                    let clean_resp = xlsx_re.replace(&response, "*(Tableur Excel généré)*").into_owned();
+                    current_messages.push(serde_json::json!({"role": "assistant", "content": clean_resp}));
+                    current_messages.push(serde_json::json!({
+                        "role": "system", 
+                        "content": "Success: Excel file ready. Now briefly inform the user in their language."
+                    }));
+                    continue;
                 }
             }
         }
         
-        // Final conversational response (streamed)
+        // Final response: use streaming for a smooth conversational end
         final_response = ollama::chat_stream(app.clone(), current_messages.clone(), &active_model, false).await?;
         break; 
     }

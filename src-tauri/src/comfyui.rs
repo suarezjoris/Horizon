@@ -102,36 +102,39 @@ pub async fn interrupt_comfyui() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn generate_image(prompt: String) -> Result<Vec<u8>, String> {
+pub async fn generate_image(prompt: String, engine: String) -> Result<Vec<u8>, String> {
     let s = settings::load();
     
     // 1. Unload Ollama to free VRAM
     let _ = ollama::unload(&s.llm_model).await;
 
     // 2. Load workflow template
+    let workflow_file = if engine == "flux" {
+        "comfyui-flux-workflow.json"
+    } else {
+        "comfyui-default-workflow.json"
+    };
+
     let current_dir = std::env::current_dir().unwrap_or_default();
     let mut paths_to_try = vec![
-        current_dir.join("assets/comfyui-default-workflow.json"),
-        current_dir.parent().map(|p| p.join("assets/comfyui-default-workflow.json")).unwrap_or_default(),
+        current_dir.join(format!("assets/{}", workflow_file)),
+        current_dir.parent().map(|p| p.join(format!("assets/{}", workflow_file))).unwrap_or_default(),
     ];
 
-    // Try relative to the executable path (useful when running the built binary)
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            paths_to_try.push(exe_dir.join("assets/comfyui-default-workflow.json"));
-            // In dev mode, the exe is in target/debug/, assets are 2 levels up
+            paths_to_try.push(exe_dir.join(format!("assets/{}", workflow_file)));
             if let Some(parent) = exe_dir.parent() {
                 if let Some(grandparent) = parent.parent() {
-                    paths_to_try.push(grandparent.join("assets/comfyui-default-workflow.json"));
+                    paths_to_try.push(grandparent.join(format!("assets/{}", workflow_file)));
                 }
             }
         }
     }
     
-    // Fallback for system installation (absolute path to the source for now)
     if let Some(home) = dirs::home_dir() {
-        paths_to_try.push(home.join("Projects/Horizon/assets/comfyui-default-workflow.json"));
-        paths_to_try.push(home.join("Projects/Horizon/src-tauri/assets/comfyui-default-workflow.json"));
+        paths_to_try.push(home.join(format!("Projects/Horizon/assets/{}", workflow_file)));
+        paths_to_try.push(home.join(format!("Projects/Horizon/src-tauri/assets/{}", workflow_file)));
     }
 
     let mut workflow_path = paths_to_try[0].clone();
@@ -150,7 +153,7 @@ pub async fn generate_image(prompt: String) -> Result<Vec<u8>, String> {
         let content = std::fs::read_to_string(&workflow_path).map_err(|e| format!("{}: {:?}", e, workflow_path))?;
         serde_json::from_str(&content).map_err(|e| e.to_string())?
     } else {
-        return Err(format!("Workflow template missing at assets/comfyui-default-workflow.json. Tried: {:?}", workflow_path).into());
+        return Err(format!("Workflow template missing at assets/{}. Tried: {:?}", workflow_file, workflow_path).into());
     };
 
     // 3. Inject prompt and randomize seed
@@ -159,10 +162,13 @@ pub async fn generate_image(prompt: String) -> Result<Vec<u8>, String> {
     
     if let Some(nodes) = workflow.as_object_mut() {
         for node in nodes.values_mut() {
-            // Randomize seed for any KSampler node
-            if node["class_type"] == "KSampler" {
-                if let Some(inputs) = node["inputs"].as_object_mut() {
+            // Randomize ANY field named "seed" or "noise_seed" in ANY node
+            if let Some(inputs) = node["inputs"].as_object_mut() {
+                if inputs.contains_key("seed") {
                     inputs["seed"] = serde_json::json!(seed);
+                }
+                if inputs.contains_key("noise_seed") {
+                    inputs["noise_seed"] = serde_json::json!(seed);
                 }
             }
 
@@ -171,7 +177,11 @@ pub async fn generate_image(prompt: String) -> Result<Vec<u8>, String> {
                     // Check if this is the positive prompt node (ours has "masterpiece" in template)
                     if let Some(text) = inputs.get("text").and_then(|v| v.as_str()) {
                         if text.contains("masterpiece") {
-                            inputs["text"] = Value::String(format!("score_9, score_8_up, score_7_up, {}, {}, masterpiece, highly detailed", s.image_rating, prompt));
+                            if engine == "flux" {
+                                inputs["text"] = Value::String(format!("{}, cinematic, highly detailed, masterpiece", prompt));
+                            } else {
+                                inputs["text"] = Value::String(format!("score_9, score_8_up, score_7_up, {}, {}, masterpiece, highly detailed", s.image_rating, prompt));
+                            }
                             found = true;
                         }
                     }

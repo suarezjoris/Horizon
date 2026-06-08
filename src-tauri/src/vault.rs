@@ -54,7 +54,7 @@ pub fn append_note(vault_path: &str, rel_path: &str, text: &str) -> Result<(), S
 }
 
 /// Extract all [[wikilink]] targets from a markdown string.
-pub fn extract_wikilinks(text: &str) -> Vec<String> {
+pub fn extract_wikilinks(text: &str) -> Vec<&str> {
     let mut links = Vec::new();
     let bytes = text.as_bytes();
     let mut i = 0;
@@ -66,7 +66,7 @@ pub fn extract_wikilinks(text: &str) -> Vec<String> {
                 i += 1;
             }
             let link = &text[start..i];
-            if !link.is_empty() { links.push(link.to_string()); }
+            if !link.is_empty() { links.push(link); }
             i += 2;
         } else {
             i += 1;

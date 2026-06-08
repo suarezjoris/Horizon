@@ -35,6 +35,10 @@ struct EmbedResponse {
     embeddings: Vec<Vec<f32>>,
 }
 
+lazy_static::lazy_static! {
+    static ref HTTP_CLIENT: Client = Client::new();
+}
+
 /// Stream a chat response, emitting "llm-token" events for each token.
 /// Returns the full assembled response.
 pub async fn chat_stream(
@@ -43,8 +47,7 @@ pub async fn chat_stream(
     model: &str,
     silent: bool,
 ) -> Result<String, String> {
-    let client = Client::new();
-    let response = client
+    let response = HTTP_CLIENT
         .post("http://localhost:11434/api/chat")
         .json(&ChatRequest {
             model: model.to_string(),
@@ -60,41 +63,23 @@ pub async fn chat_stream(
         return Err(format!("Ollama error: {}", response.status()));
     }
 
-    let mut full = String::new();
+    let mut full = String::with_capacity(4096);
     let mut byte_stream = response.bytes_stream();
-    let mut line_buf: Vec<u8> = Vec::new();
-    let mut utf8_buf: Vec<u8> = Vec::new();
+    let mut buf: Vec<u8> = Vec::with_capacity(1024);
 
     while let Some(chunk) = byte_stream.next().await {
-        line_buf.extend_from_slice(&chunk.map_err(|e| e.to_string())?);
+        buf.extend_from_slice(&chunk.map_err(|e| e.to_string())?);
         
-        while let Some(pos) = line_buf.iter().position(|&b| b == b'\n') {
-            let line = line_buf.drain(..=pos).collect::<Vec<u8>>();
+        while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+            let line = buf.drain(..=pos + 1).collect::<Vec<u8>>();
             if let Ok(c) = serde_json::from_slice::<ChatChunk>(&line) {
                 if !c.done {
-                    let token_bytes = c.message.content.as_bytes();
-                    utf8_buf.extend_from_slice(token_bytes);
-                    
-                    // Only emit/append what is currently valid UTF-8
-                    match String::from_utf8(utf8_buf.clone()) {
-                        Ok(valid_str) => {
-                            full.push_str(&valid_str);
-                            if !silent {
-                                let _ = app.emit("llm-token", &valid_str);
-                            }
-                            utf8_buf.clear();
-                        }
-                        Err(e) => {
-                            // If invalid, keep bytes in buffer and wait for more (might be mid-character)
-                            let valid_up_to = e.utf8_error().valid_up_to();
-                            if valid_up_to > 0 {
-                                let valid_part = String::from_utf8_lossy(&utf8_buf[..valid_up_to]).into_owned();
-                                full.push_str(&valid_part);
-                                if !silent {
-                                    let _ = app.emit("llm-token", &valid_part);
-                                }
-                                utf8_buf.drain(..valid_up_to);
-                            }
+                    let token = c.message.content;
+                    full.push_str(&token);
+                    if !silent {
+                        // Skip technical tags in UI
+                        if !token.contains("GENERATE_") && !token.contains("SEARCH_WEB") {
+                            let _ = app.emit("llm-token", &token);
                         }
                     }
                 }
@@ -107,8 +92,7 @@ pub async fn chat_stream(
 
 /// Get embeddings for a list of texts.
 pub async fn embed(texts: Vec<String>, model: &str) -> Result<Vec<Vec<f32>>, String> {
-    let client = Client::new();
-    let resp: EmbedResponse = client
+    let resp: EmbedResponse = HTTP_CLIENT
         .post("http://localhost:11434/api/embed")
         .json(&EmbedRequest { model: model.to_string(), input: texts })
         .send()
@@ -125,8 +109,7 @@ pub async fn chat_once(
     messages: Vec<serde_json::Value>,
     model: &str,
 ) -> Result<String, String> {
-    let client = Client::new();
-    let resp = client
+    let resp = HTTP_CLIENT
         .post("http://localhost:11434/api/chat")
         .json(&serde_json::json!({
             "model": model,
@@ -144,8 +127,7 @@ pub async fn chat_once(
 
 /// Describe an image using moondream:latest
 pub async fn describe_image(base64_image: &str) -> Result<String, String> {
-    let client = Client::new();
-    let resp = client
+    let resp = HTTP_CLIENT
         .post("http://localhost:11434/api/generate")
         .json(&serde_json::json!({
             "model": "moondream:latest",
@@ -176,8 +158,7 @@ struct Model {
 }
 
 pub async fn list_models() -> Result<Vec<String>, String> {
-    let client = Client::new();
-    let resp: ModelList = client
+    let resp: ModelList = HTTP_CLIENT
         .get("http://localhost:11434/api/tags")
         .send()
         .await
@@ -190,8 +171,7 @@ pub async fn list_models() -> Result<Vec<String>, String> {
 
 /// Unload the active model from VRAM (sets keep_alive to 0).
 pub async fn unload(model: &str) -> Result<(), String> {
-    let client = Client::new();
-    let _ = client
+    let _ = HTTP_CLIENT
         .post("http://localhost:11434/api/generate")
         .json(&serde_json::json!({ "model": model, "keep_alive": 0 }))
         .send()

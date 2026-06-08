@@ -68,12 +68,16 @@ pub async fn generate_video(
     // 3. Inject Parameters into native WanVideoWrapper nodes
     let seed = seed.unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
     let steps = match quality.as_str() {
-        "low" => 20,
-        "mid" => 30,
-        "high" => 50,
-        _ => 30,
+        "low" => 15,
+        "mid" => 25,
+        "high" => 35,
+        _ => 25,
     };
-    let frames = (duration as i64 * fps).clamp(8, 120);
+    
+    // User requested unconstrained duration limits. Keeping a lower bound of 8 frames.
+    let frames = (duration as i64 * fps).max(8); 
+    let safe_width = width.max(128); // Allow up to 1080p+, just prevent 0
+    let safe_height = height.max(128);
 
     if let Some(nodes) = workflow.as_object_mut() {
         for (id, node) in nodes.iter_mut() {
@@ -101,10 +105,10 @@ pub async fn generate_video(
                         inputs["num_frames"] = serde_json::json!(frames);
                     }
                     if inputs.contains_key("width") {
-                        inputs["width"] = serde_json::json!(width);
+                        inputs["width"] = serde_json::json!(safe_width);
                     }
                     if inputs.contains_key("height") {
-                        inputs["height"] = serde_json::json!(height);
+                        inputs["height"] = serde_json::json!(safe_height);
                     }
                 }
             }

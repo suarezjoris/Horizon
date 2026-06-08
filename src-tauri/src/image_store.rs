@@ -23,6 +23,7 @@ pub fn save_generated_image(bytes: Vec<u8>, prompt: String) -> Result<String, St
     }
 
     let date = Local::now().format("%Y-%m-%d").to_string();
+    let timestamp = Local::now().timestamp();
     let slug = prompt
         .chars()
         .filter(|c| c.is_alphanumeric() || c.is_whitespace())
@@ -34,9 +35,9 @@ pub fn save_generated_image(bytes: Vec<u8>, prompt: String) -> Result<String, St
         .to_lowercase();
     
     let base_name = if slug.is_empty() {
-        format!("{}-{}", date, Local::now().timestamp())
+        format!("{}-{}", date, timestamp)
     } else {
-        format!("{}-{}", date, slug)
+        format!("{}-{}-{}", date, slug, timestamp)
     };
 
     let img_path = images_dir.join(format!("{}.png", base_name));

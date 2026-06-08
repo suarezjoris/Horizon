@@ -66,7 +66,14 @@ pub async fn generate_docx(content: DocxContent) -> Result<String, String> {
     let mut path = PathBuf::from(&s.vault_path).join("documents");
     std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
     
-    let filename = if content.filename.ends_with(".docx") { content.filename } else { format!("{}.docx", content.filename) };
+    // SECURITY FIX (Vuln 4): Extract only the valid file name to prevent path traversal
+    let safe_filename = std::path::Path::new(&content.filename)
+        .file_name()
+        .unwrap_or(std::ffi::OsStr::new("document"))
+        .to_string_lossy()
+        .into_owned();
+    
+    let filename = if safe_filename.ends_with(".docx") { safe_filename } else { format!("{}.docx", safe_filename) };
     path.push(&filename);
 
     let mut doc = Docx::new()
@@ -157,16 +164,27 @@ pub async fn generate_pptx(content: PptxContent) -> Result<String, String> {
     let base_path = PathBuf::from(&s.vault_path).join("documents");
     std::fs::create_dir_all(&base_path).map_err(|e| e.to_string())?;
 
-    let filename = if content.filename.ends_with(".pptx") { content.filename.clone() } else { format!("{}.pptx", content.filename) };
+    // SECURITY FIX (Vuln 4)
+    let safe_filename = std::path::Path::new(&content.filename)
+        .file_name()
+        .unwrap_or(std::ffi::OsStr::new("presentation"))
+        .to_string_lossy()
+        .into_owned();
+
+    let filename = if safe_filename.ends_with(".pptx") { safe_filename } else { format!("{}.pptx", safe_filename) };
     let output_path = base_path.join(&filename);
     
     let mut data = serde_json::to_value(&content).map_err(|e| e.to_string())?;
     data["output_path"] = serde_json::json!(output_path.to_string_lossy());
     
-    // Check for a user template
-    let template_file = base_path.join("template.pptx");
-    if template_file.exists() {
-        data["template_path"] = serde_json::json!(template_file.to_string_lossy());
+    // Check for master template (priority: assets > documents)
+    let master_template = PathBuf::from(&s.vault_path).join("assets/template.pptx");
+    let user_template = base_path.join("template.pptx");
+    
+    if master_template.exists() {
+        data["template_path"] = serde_json::json!(master_template.to_string_lossy());
+    } else if user_template.exists() {
+        data["template_path"] = serde_json::json!(user_template.to_string_lossy());
     }
 
     let home = dirs::home_dir().ok_or("Could not find home directory")?;
@@ -194,7 +212,14 @@ pub async fn generate_xlsx(content: XlsxContent) -> Result<String, String> {
     let mut path = PathBuf::from(&s.vault_path).join("documents");
     std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
 
-    let filename = if content.filename.ends_with(".xlsx") { content.filename } else { format!("{}.xlsx", content.filename) };
+    // SECURITY FIX (Vuln 4)
+    let safe_filename = std::path::Path::new(&content.filename)
+        .file_name()
+        .unwrap_or(std::ffi::OsStr::new("spreadsheet"))
+        .to_string_lossy()
+        .into_owned();
+
+    let filename = if safe_filename.ends_with(".xlsx") { safe_filename } else { format!("{}.xlsx", safe_filename) };
     path.push(&filename);
 
     let mut workbook = Workbook::new();

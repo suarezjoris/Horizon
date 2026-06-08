@@ -79,6 +79,7 @@ async function loadGallery() {
 async function generate() {
     console.log("Image Module: Generate clicked");
     const prompt = promptInput.value.trim();
+    const engine = document.getElementById('image-engine').value;
     if (!prompt) return;
 
     generateBtn.disabled = true;
@@ -93,7 +94,7 @@ async function generate() {
         }
 
         statusText.textContent = 'Generating... (VRAM unloading)';
-        const bytes = await safeInvoke('generate_image', { prompt });
+        const bytes = await safeInvoke('generate_image', { prompt, engine });
         
         statusText.textContent = 'Saving...';
         const imgPath = await safeInvoke('save_generated_image', { bytes, prompt });

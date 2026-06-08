@@ -16,7 +16,7 @@
   <div id="diagnostic-box">
     <div id="diagnostic-header">
       <div id="diagnostic-logo">H</div>
-      <div id="diagnostic-title">Horizon System Check</div>
+      <div id="diagnostic-title">Horizon</div>
     </div>
     <div id="diagnostic-list">
       <!-- Diagnostics will be injected here -->
@@ -114,9 +114,13 @@
   <!-- Image Panel -->
   <div class="panel" id="panel-image">
     <div id="image-container">
-      <div id="image-generator-box">
+      <div id="image-controls-container">
         <textarea id="image-prompt" placeholder="Describe the image you want to generate..."></textarea>
-        <div id="generate-controls">
+        <div id="image-actions">
+          <select id="image-engine">
+            <option value="pony">🐴 Pony V6 XL (Stylized)</option>
+            <option value="flux" selected>🌊 FLUX.1 Uncensored (Photoreal)</option>
+          </select>
           <div id="gen-status">Ready</div>
           <button id="generate-btn">Generate Image</button>
         </div>
@@ -151,9 +155,9 @@
           
           <div id="cinema-params">
             <div class="param-row">
-              <label>Duration</label>
-              <input type="range" id="video-duration" min="2" max="8" step="1" value="4">
-              <span id="duration-val">4s</span>
+              <label>Duration (s)</label>
+              <input type="number" id="video-duration" min="1" step="1" value="4">
+
             </div>
             <div class="param-row">
               <label>Quality</label>
@@ -171,9 +175,11 @@
             <div class="param-row">
               <label>Resolution</label>
               <select id="video-resolution">
-                <option value="480">480² (fast / low VRAM)</option>
-                <option value="640" selected>640² (balanced)</option>
-                <option value="720">720² (quality / slow)</option>
+                <option value="256">256² (30s+ safe)</option>
+                <option value="384">384² (Long / Fast)</option>
+                <option value="512">512² (Standard)</option>
+                <option value="720" selected>720² (Short clips)</option>
+                <option value="1080">1080² (VRAM Heavy)</option>
               </select>
             </div>
             <div class="param-row">
@@ -246,7 +252,7 @@
 </div>
 
 <div id="help-overlay" class="overlay">
-  <div id="help-panel" style="max-width: 600px; padding: 20px; border-radius: 12px; background: var(--bg-surface); border: 1px solid var(--border-color); color: var(--text-dim); max-height: 80vh; overflow-y: auto;">
+  <div id="help-panel">
     <h3 style="color: var(--accent-gold); margin-bottom: 15px; margin-top: 0;">Cheatsheet & AI Technologies</h3>
     
     <h4 style="color: var(--text-color); margin-bottom: 5px;">🤖 AI Stack</h4>
@@ -283,7 +289,7 @@
     </ul>
 
     <div style="text-align: right; margin-top: 20px;">
-      <button id="close-help-btn" style="background: rgba(255,255,255,0.1); color: var(--text-color); border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer;">Close</button>
+      <button id="close-help-btn">Close</button>
     </div>
   </div>
 </div>
@@ -303,7 +309,7 @@
       </select>
     </div>
 
-    <div id="persona-crafter" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-glass);">
+    <div id="persona-crafter">
       <h4 style="color: var(--accent-gold); margin-bottom: 10px;">🎭 Persona Crafter</h4>
       <div class="setting-row">
         <label>Persona Name</label>
@@ -311,13 +317,13 @@
       </div>
       <div class="setting-row">
         <label>System Prompt / Behavior</label>
-        <textarea id="pc-prompt" style="background: rgba(0,0,0,0.4); border: var(--border-glass); border-radius: var(--radius-md); padding: 15px; color: var(--text-main); font-size: 14px; min-height: 80px; resize: vertical; outline: none;" placeholder="How should this persona behave?"></textarea>
+        <textarea id="pc-prompt" placeholder="How should this persona behave?"></textarea>
       </div>
-      <button id="pc-save-btn" style="margin-top: 10px; background: var(--accent-gold-strong); color: #000; border: none; border-radius: 8px; padding: 10px; font-weight: 800; cursor: pointer;">Save Persona</button>
+      <button id="pc-save-btn">Save Persona</button>
     </div>
 
-    <div id="settings-footer" style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-       <button id="reset-mem-btn" style="background: rgba(255,95,87,0.1); color: #ff5f57; border: 1px solid #ff5f57; padding: 10px 20px; border-radius: 15px; font-weight: 800; cursor: pointer;">Wipe Memory</button>
+    <div id="settings-footer">
+       <button id="reset-mem-btn">Wipe Memory</button>
        <button id="settings-save">Save</button>
     </div>
   </div>

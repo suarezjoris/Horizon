@@ -14,7 +14,8 @@ pub async fn get_context(query: &str) -> String {
         if let Ok(vecs) = ollama::embed(vec![query.to_string()], "nomic-embed-text:latest").await {
             if let Some(qvec) = vecs.into_iter().next() {
                 let results = embeddings::search(&index, &qvec, TOP_K);
-                let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+                // Optimize: Pre-allocate HashSet
+                let mut seen: std::collections::HashSet<String> = std::collections::HashSet::with_capacity(TOP_K * 3);
                 
                 for entry in results {
                     if current_len >= MAX_CONTEXT_CHARS { break; }
@@ -27,7 +28,7 @@ pub async fn get_context(query: &str) -> String {
                         // Follow wikilinks in this chunk (Graph Expansion)
                         for link in vault::extract_wikilinks(&entry.chunk) {
                             if current_len >= MAX_CONTEXT_CHARS { break; }
-                            let md = if link.ends_with(".md") { link.clone() } else { format!("{}.md", link) };
+                            let md = if link.ends_with(".md") { link.to_string() } else { format!("{}.md", link) };
                             if !seen.contains(&md) && vault::validate_rel_path(&md).is_ok() {
                                 seen.insert(md.clone());
                                 if let Ok(c) = vault::read_vault_note(&s.vault_path, &md) {
@@ -69,8 +70,10 @@ pub async fn process_calibration(text: String) -> Result<String, String> {
 
     if let Some(obj) = data.as_object() {
         for (file, content) in obj {
-            if let Some(c) = content.as_str() {
-                let _ = vault::write_vault_note(&s.vault_path, file, c);
+            if vault::validate_rel_path(file).is_ok() {
+                if let Some(c) = content.as_str() {
+                    let _ = vault::write_vault_note(&s.vault_path, file, c);
+                }
             }
         }
     }
@@ -157,12 +160,13 @@ pub async fn consolidate_vault() -> Result<String, String> {
 
     if let Some(obj) = data.as_object() {
         for (file, content) in obj {
-            if content.is_null() {
-                // Delete file (best effort)
-                let path = std::path::PathBuf::from(&s.vault_path).join(file);
-                let _ = std::fs::remove_file(path);
-            } else if let Some(c) = content.as_str() {
-                let _ = vault::write_vault_note(&s.vault_path, file, c);
+            if vault::validate_rel_path(file).is_ok() {
+                if content.is_null() {
+                    let path = std::path::PathBuf::from(&s.vault_path).join(file);
+                    let _ = std::fs::remove_file(path);
+                } else if let Some(c) = content.as_str() {
+                    let _ = vault::write_vault_note(&s.vault_path, file, c);
+                }
             }
         }
     }
