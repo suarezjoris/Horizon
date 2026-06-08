@@ -17,6 +17,8 @@ mod vault;
 mod graphify;
 mod office;
 mod wikipedia;
+mod armata;
+mod vram_queue;
 
 use tauri::Emitter;
 
@@ -353,6 +355,8 @@ fn main() {
             diagnostic::fix_health_issue,
             openclaude::start_openclaude,
             openclaude::send_openclaude_raw,
+            armata::execute_armata_command,
+            armata::toggle_agent,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
