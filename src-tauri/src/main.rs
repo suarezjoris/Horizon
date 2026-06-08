@@ -360,6 +360,7 @@ fn main() {
             openclaude::send_openclaude_raw,
             armata::execute_armata_command,
             armata::toggle_agent,
+            armata::get_armata_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
