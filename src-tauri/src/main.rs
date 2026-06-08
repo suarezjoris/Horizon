@@ -21,6 +21,7 @@ mod armata;
 mod vram_queue;
 mod archivist;
 mod vanguard;
+mod antenna;
 
 use tauri::Emitter;
 
