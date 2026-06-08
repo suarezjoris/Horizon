@@ -19,6 +19,7 @@ mod office;
 mod wikipedia;
 mod armata;
 mod vram_queue;
+mod archivist;
 
 use tauri::Emitter;
 
