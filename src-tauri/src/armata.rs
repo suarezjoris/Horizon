@@ -32,9 +32,20 @@ fn emit_log(app: &AppHandle, msg: &str) {
 
 /// Core router — used by both the Tauri command and the Antenna bridge.
 pub async fn route_command(cmd: String) -> Result<String, String> {
+    let s = settings::load();
     match classify(&cmd) {
-        CommandKind::Archivist => archivist_run_once().await,
-        CommandKind::Vanguard => vanguard_run_once().await,
+        CommandKind::Archivist => {
+            if !s.agents.archivist_enabled {
+                return Err("Archivist agent is disabled".to_string());
+            }
+            archivist_run_once().await
+        }
+        CommandKind::Vanguard => {
+            if !s.agents.vanguard_enabled {
+                return Err("Vanguard agent is disabled".to_string());
+            }
+            vanguard_run_once().await
+        }
         CommandKind::OsTool => os_tool_run(&cmd),
         CommandKind::LlmFallback => llm_run(&cmd).await,
     }
@@ -112,10 +123,22 @@ async fn archivist_run_once() -> Result<String, String> {
     Ok(format!("ARCHIVIST: Filed {} item(s)", count))
 }
 
+fn is_safe_feed_url(url: &str) -> bool {
+    let lower = url.to_lowercase();
+    (lower.starts_with("http://") || lower.starts_with("https://"))
+        && !lower.contains("localhost")
+        && !lower.contains("127.0.0.1")
+        && !lower.contains("::1")
+        && !lower.contains("0.0.0.0")
+}
+
 async fn vanguard_run_once() -> Result<String, String> {
     let s = settings::load();
     let mut intercepted = 0usize;
     for feed_url in &s.agents.vanguard_feeds {
+        if !is_safe_feed_url(feed_url) {
+            continue;
+        }
         if let Ok(resp) = reqwest::get(feed_url).await {
             if let Ok(text) = resp.text().await {
                 intercepted += crate::vanguard::parse_rss_items(&text).len();
@@ -142,6 +165,13 @@ fn os_tool_run(cmd: &str) -> Result<String, String> {
 
     if let Some(pos) = words.iter().position(|&w| w == "open" || w == "launch" || w == "start") {
         if let Some(app_name) = words.get(pos + 1) {
+            const ALLOWED_APPS: &[&str] = &[
+                "spotify", "firefox", "chromium", "kitty", "alacritty",
+                "code", "nautilus", "thunar", "pcmanfm", "vlc", "mpv",
+            ];
+            if !ALLOWED_APPS.contains(app_name) {
+                return Err(format!("App '{}' not in allowlist", app_name));
+            }
             std::process::Command::new(app_name)
                 .spawn()
                 .map(|_| format!("Launched: {}", app_name))

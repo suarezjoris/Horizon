@@ -61,6 +61,12 @@ async fn handle_command(
 
 pub async fn run_antenna(app: AppHandle, running: Arc<AtomicBool>) {
     let s = settings::load();
+
+    if s.agents.antenna_token == "changeme" || s.agents.antenna_token.is_empty() {
+        emit_status(&app, "error", "Antenna refused: set a real token in Settings (current token is 'changeme')");
+        return;
+    }
+
     let port = s.agents.antenna_port;
     let token = s.agents.antenna_token.clone();
 
@@ -71,7 +77,7 @@ pub async fn run_antenna(app: AppHandle, running: Arc<AtomicBool>) {
         .route("/command", post(handle_command))
         .with_state(state);
 
-    let addr = format!("0.0.0.0:{}", port);
+    let addr = format!("127.0.0.1:{}", port);
     emit_status(&app, "online", &format!("Listening on http://{}", addr));
 
     let listener = match tokio::net::TcpListener::bind(&addr).await {
