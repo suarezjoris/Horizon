@@ -52,10 +52,28 @@ pub async fn route_command(cmd: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn execute_armata_command(app: AppHandle, cmd: String) -> Result<String, String> {
+pub async fn execute_armata_command(
+    app: AppHandle, 
+    vram_queue: tauri::State<'_, crate::vram_queue::VramQueue>,
+    cmd: String
+) -> Result<String, String> {
     emit_log(&app, &format!("> {}", cmd));
+    
+    // We only acquire permit IF it's an LLM command. 
+    // But classification happens inside route_command.
+    // Let's just acquire it for everything to be safe, or refactor.
+    // Actually, classifying is fast.
+    
+    let kind = classify(&cmd);
+    let permit = if kind == CommandKind::LlmFallback {
+        Some(vram_queue.acquire("Armata LLM").await?)
+    } else {
+        None
+    };
+
     let result = route_command(cmd).await?;
     emit_log(&app, &result);
+    drop(permit);
     Ok(result)
 }
 
@@ -68,6 +86,7 @@ pub async fn toggle_agent(app: AppHandle, agent: String, enabled: bool) -> Resul
         "archivist" => s.agents.archivist_enabled = enabled,
         "vanguard" => s.agents.vanguard_enabled = enabled,
         "antenna" => s.agents.antenna_enabled = enabled,
+        "forge" => s.agents.forge_enabled = enabled,
         _ => return Err(format!("Unknown agent: {}", agent)),
     }
 
@@ -90,6 +109,7 @@ pub fn get_armata_status() -> serde_json::Value {
         "archivist": s.agents.archivist_enabled,
         "vanguard": s.agents.vanguard_enabled,
         "antenna": s.agents.antenna_enabled,
+        "forge": s.agents.forge_enabled,
         "antenna_port": s.agents.antenna_port,
         "vanguard_interval": s.agents.vanguard_interval_minutes,
         "light_model": s.agents.light_model,

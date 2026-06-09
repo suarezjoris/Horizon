@@ -77,6 +77,12 @@
     }
 
     // --- Toggle buttons ---
+    document.getElementById('toggle-forge')?.addEventListener('click', async () => {
+        const toggle = document.getElementById('toggle-forge');
+        const isActive = toggle.classList.contains('active');
+        await invoke('toggle_agent_daemon', { agent: 'forge', enabled: !isActive });
+    });
+
     document.querySelectorAll('.agent-toggle:not(.agent-toggle--static)').forEach(toggle => {
         toggle.addEventListener('click', async () => {
             const card = toggle.closest('.agent-card');
