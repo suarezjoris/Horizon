@@ -82,6 +82,161 @@ pub fn find_orphans(vault_path: &str) -> Vec<PathBuf> {
     orphans
 }
 
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::collections::HashSet;
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter};
+use notify::{Watcher, RecursiveMode, EventKind};
+
+fn emit_status(app: &AppHandle, msg: &str) {
+    let _ = app.emit("armata-agent-status", serde_json::json!({
+        "agent": "forge",
+        "status": "online",
+        "message": msg
+    }));
+}
+
+async fn ingest_binary(app: &AppHandle, path: &PathBuf, vault_path: &str, model: &str) {
+    let filename = match path.file_name() {
+        Some(n) => n.to_string_lossy().into_owned(),
+        None => return,
+    };
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+
+    let text = match ext.as_str() {
+        "pdf" => extract_pdf(path),
+        "docx" | "pptx" | "xlsx" => extract_zip_xml(path),
+        _ => return,
+    };
+
+    let text = match text {
+        Some(t) if t.split_whitespace().count() > 30 => t,
+        _ => {
+            emit_status(app, &format!("Skipped (no text): {}", filename));
+            return;
+        }
+    };
+
+    emit_status(app, &format!("Ingesting: {}", filename));
+
+    let prompt = format!(
+        "Extract the key knowledge from this document into a structured markdown note. Include a title, summary, and bullet-point key facts. Be concise.\n\nDocument: {}\n\nContent:\n{}",
+        filename,
+        &text[..text.len().min(3000)]
+    );
+    let msgs = vec![serde_json::json!({"role": "user", "content": prompt})];
+    let summary = match crate::ollama::chat_once(msgs, model).await {
+        Ok(s) => s,
+        Err(_) => {
+            emit_status(app, &format!("Ingest failed: {}", filename));
+            return;
+        }
+    };
+
+    let slug = url_slug(&filename);
+    let dest = PathBuf::from(vault_path).join("knowledge").join(format!("{}.md", slug));
+    if dest.exists() { return; }
+    let _ = std::fs::create_dir_all(dest.parent().unwrap());
+    let _ = std::fs::write(&dest, format!("# {}\n\n**Source:** {}\n\n{}\n", filename, path.display(), summary));
+    emit_status(app, &format!("Ingested: {} → knowledge/{}.md", filename, slug));
+}
+
+pub async fn run_forge(app: AppHandle, running: Arc<AtomicBool>) {
+    let s = crate::settings::load();
+    let vault_path = s.vault_path.clone();
+    let light_model = s.agents.light_model.clone();
+
+    let home = dirs::home_dir().unwrap_or_default();
+    let sorted_intel = home.join("Documents/Horizon_Vault/Sorted_Intel/documents");
+    let vanguard_dir = PathBuf::from(&vault_path).join("vanguard");
+
+    let _ = std::fs::create_dir_all(&sorted_intel);
+    let _ = std::fs::create_dir_all(&vanguard_dir);
+
+    emit_status(&app, "Vault Consolidator active");
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut watcher = match notify::recommended_watcher(tx) {
+        Ok(w) => w,
+        Err(e) => {
+            let _ = app.emit("armata-agent-status", serde_json::json!({
+                "agent": "forge", "status": "error",
+                "message": format!("Watcher init failed: {}", e)
+            }));
+            return;
+        }
+    };
+
+    let _ = watcher.watch(&sorted_intel, RecursiveMode::NonRecursive);
+    let _ = watcher.watch(&vanguard_dir, RecursiveMode::NonRecursive);
+    let vault_root = PathBuf::from(&vault_path);
+    let _ = watcher.watch(&vault_root, RecursiveMode::NonRecursive);
+
+    let mut pending: HashSet<PathBuf> = HashSet::new();
+    let mut last_event: Option<Instant> = None;
+    let mut last_orphan_scan = Instant::now();
+    let orphan_interval = Duration::from_secs(2 * 60 * 60);
+    let debounce = Duration::from_secs(30);
+
+    while running.load(Ordering::Relaxed) {
+        match rx.recv_timeout(Duration::from_millis(500)) {
+            Ok(Ok(event)) => {
+                if matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
+                    for path in event.paths {
+                        if path.is_file() {
+                            pending.insert(path);
+                            last_event = Some(Instant::now());
+                        }
+                    }
+                }
+            }
+            Ok(Err(_)) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(_) => break,
+        }
+
+        if let Some(t) = last_event {
+            if t.elapsed() >= debounce && !pending.is_empty() {
+                let to_ingest: Vec<PathBuf> = pending.iter()
+                    .filter(|p| {
+                        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                        matches!(ext.as_str(), "pdf" | "docx" | "pptx" | "xlsx")
+                    })
+                    .cloned()
+                    .collect();
+
+                for path in &to_ingest {
+                    ingest_binary(&app, path, &vault_path, &light_model).await;
+                }
+
+                pending.clear();
+                last_event = None;
+
+                emit_status(&app, "Consolidating vault…");
+                match crate::memory::consolidate_vault_inner().await {
+                    Ok(msg) => emit_status(&app, &msg),
+                    Err(e) => emit_status(&app, &format!("Consolidation error: {}", e)),
+                }
+            }
+        }
+
+        if last_orphan_scan.elapsed() >= orphan_interval {
+            last_orphan_scan = Instant::now();
+            let orphans = find_orphans(&vault_path);
+            if !orphans.is_empty() {
+                emit_status(&app, &format!("Found {} orphan nodes — consolidating", orphans.len()));
+                match crate::memory::consolidate_vault_inner().await {
+                    Ok(msg) => emit_status(&app, &msg),
+                    Err(e) => emit_status(&app, &format!("Orphan consolidation error: {}", e)),
+                }
+            }
+        }
+    }
+
+    let _ = app.emit("armata-agent-status", serde_json::json!({
+        "agent": "forge", "status": "offline", "message": "Forge stopped"
+    }));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
