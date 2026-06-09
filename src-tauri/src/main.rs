@@ -9,7 +9,7 @@ mod ollama;
 mod openclaude;
 mod pyenv;
 mod audio;
-mod diagnostic;
+mod sys_diagnostic;
 mod cinema;
 mod search;
 mod settings;
@@ -23,15 +23,23 @@ mod archivist;
 mod vanguard;
 mod antenna;
 
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::collections::HashMap;
+
+struct ArmataState {
+    running_flags: std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
 
 #[tauri::command]
 async fn chat(
     app: tauri::AppHandle,
+    vram_queue: tauri::State<'_, vram_queue::VramQueue>,
     messages: Vec<serde_json::Value>,
     model: Option<String>,
     persona: Option<String>,
 ) -> Result<(), String> {
+    let _permit = vram_queue.acquire("LLM Chat").await?;
     let s = settings::load();
     
     // Choose model: override > settings default
@@ -307,6 +315,59 @@ async fn search_vault(query: String) -> Result<Vec<String>, String> {
     }).collect())
 }
 
+#[tauri::command]
+async fn toggle_agent_daemon(
+    app: tauri::AppHandle,
+    armata_state: tauri::State<'_, ArmataState>,
+    agent: String,
+    enabled: bool,
+) -> Result<String, String> {
+    {
+        let mut flags = armata_state.running_flags.lock().unwrap();
+
+        if !enabled {
+            // Signal existing daemon to stop
+            if let Some(flag) = flags.remove(&agent) {
+                flag.store(false, Ordering::Relaxed);
+            }
+        } else {
+            // Don't double-spawn
+            if flags.contains_key(&agent) {
+                return Ok(format!("{} already running", agent));
+            }
+
+            let flag = Arc::new(AtomicBool::new(true));
+            let app_clone = app.clone();
+            let flag_clone = flag.clone();
+
+            match agent.as_str() {
+                "archivist" => {
+                    tokio::spawn(async move {
+                        archivist::run_archivist(app_clone, flag_clone).await;
+                    });
+                }
+                "vanguard" => {
+                    tokio::spawn(async move {
+                        vanguard::run_vanguard(app_clone, flag_clone).await;
+                    });
+                }
+                "antenna" => {
+                    tokio::spawn(async move {
+                        antenna::run_antenna(app_clone, flag_clone).await;
+                    });
+                }
+                _ => return Err(format!("Unknown agent: {}", agent)),
+            }
+
+            flags.insert(agent.clone(), flag);
+        }
+    } // MutexGuard is dropped here
+
+    // Persist setting
+    armata::toggle_agent(app, agent.clone(), enabled).await?;
+    Ok(format!("{} → {}", agent, if enabled { "ONLINE" } else { "OFFLINE" }))
+}
+
 fn main() {
     // WebKitGTK on Linux/NVIDIA stalls repaints (the UI only updates on window
     // events, scrolling lags) with the DMABUF renderer. Disable it before the
@@ -315,9 +376,42 @@ fn main() {
     std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
 
     tauri::Builder::default()
+        .manage(ArmataState {
+            running_flags: std::sync::Mutex::new(HashMap::new()),
+        })
+        .manage(vram_queue::VramQueue::new())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            let s = settings::load();
+            let handle = app.handle().clone();
+
+            // Auto-start daemons that were enabled at last shutdown
+            if s.agents.archivist_enabled {
+                let flag = Arc::new(AtomicBool::new(true));
+                let app2 = handle.clone();
+                let f2 = flag.clone();
+                app.state::<ArmataState>().running_flags.lock().unwrap().insert("archivist".into(), flag);
+                tokio::spawn(async move { archivist::run_archivist(app2, f2).await; });
+            }
+            if s.agents.vanguard_enabled {
+                let flag = Arc::new(AtomicBool::new(true));
+                let app2 = handle.clone();
+                let f2 = flag.clone();
+                app.state::<ArmataState>().running_flags.lock().unwrap().insert("vanguard".into(), flag);
+                tokio::spawn(async move { vanguard::run_vanguard(app2, f2).await; });
+            }
+            if s.agents.antenna_enabled {
+                let flag = Arc::new(AtomicBool::new(true));
+                let app2 = handle.clone();
+                let f2 = flag.clone();
+                app.state::<ArmataState>().running_flags.lock().unwrap().insert("antenna".into(), flag);
+                tokio::spawn(async move { antenna::run_antenna(app2, f2).await; });
+            }
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             settings::get_settings,
             settings::save_settings,
@@ -354,13 +448,14 @@ fn main() {
             cinema::open_video,
             audio::save_audio_temp,
             audio::transcribe_audio,
-            diagnostic::run_diagnostics,
-            diagnostic::fix_health_issue,
+            sys_diagnostic::run_diagnostics,
+            sys_diagnostic::fix_health_issue,
             openclaude::start_openclaude,
             openclaude::send_openclaude_raw,
             armata::execute_armata_command,
             armata::toggle_agent,
             armata::get_armata_status,
+            toggle_agent_daemon,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
