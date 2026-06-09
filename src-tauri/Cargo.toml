@@ -32,6 +32,7 @@ rust_xlsxwriter = "0.78.0"
 zim = "0.4"
 lazy_static = "1.4.0"
 notify = "6"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 axum = { version = "0.7", features = ["tokio"] }
 tower = { version = "0.5", features = ["util"] }
 

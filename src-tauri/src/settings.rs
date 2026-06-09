@@ -6,6 +6,7 @@ pub struct AgentSettings {
     pub archivist_enabled: bool,
     pub vanguard_enabled: bool,
     pub antenna_enabled: bool,
+    pub forge_enabled: bool,
     /// Bearer token required for Antenna HTTP requests
     pub antenna_token: String,
     pub antenna_port: u16,
@@ -20,9 +21,10 @@ pub struct AgentSettings {
 impl Default for AgentSettings {
     fn default() -> Self {
         Self {
-            archivist_enabled: false,
-            vanguard_enabled: false,
+            archivist_enabled: true,
+            vanguard_enabled: true,
             antenna_enabled: false,
+            forge_enabled: true,
             antenna_token: "changeme".to_string(),
             antenna_port: 8374,
             vanguard_interval_minutes: 30,
@@ -99,9 +101,10 @@ mod tests {
     fn test_agent_settings_defaults() {
         let s = Settings::default();
         assert_eq!(s.agents.antenna_port, 8374);
-        assert!(!s.agents.archivist_enabled);
-        assert!(!s.agents.vanguard_enabled);
+        assert!(s.agents.archivist_enabled);
+        assert!(s.agents.vanguard_enabled);
         assert!(!s.agents.antenna_enabled);
+        assert!(s.agents.forge_enabled);
         assert_eq!(s.agents.vanguard_interval_minutes, 30);
         assert!(!s.agents.light_model.is_empty());
     }
