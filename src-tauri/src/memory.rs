@@ -125,8 +125,7 @@ pub async fn extract_and_save(user_msg: String, ai_msg: String) {
     }
 }
 
-#[tauri::command]
-pub async fn consolidate_vault() -> Result<String, String> {
+pub async fn consolidate_vault_inner() -> Result<String, String> {
     let s = settings::load();
     let notes = vault::list_notes();
     let mut vault_content = String::new();
@@ -172,5 +171,21 @@ pub async fn consolidate_vault() -> Result<String, String> {
     }
 
     Ok("Consolidation complete. The brain has evolved.".to_string())
+}
+
+#[tauri::command]
+pub async fn consolidate_vault() -> Result<String, String> {
+    consolidate_vault_inner().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_consolidate_vault_inner_is_pub() {
+        let _: fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send>> =
+            || Box::pin(consolidate_vault_inner());
+    }
 }
 
