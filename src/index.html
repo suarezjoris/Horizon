@@ -124,6 +124,25 @@
           <div id="gen-status">Ready</div>
           <button id="generate-btn">Generate Image</button>
         </div>
+        <div id="i2i-bar">
+          <label id="i2i-toggle-label">
+            <input type="checkbox" id="i2i-enabled">
+            <span>✏️ Modify existing image</span>
+          </label>
+          <div id="i2i-controls">
+            <div id="i2i-source-row">
+              <img id="i2i-thumb" src="" alt="">
+              <span id="i2i-source-name">No image selected</span>
+              <button id="i2i-use-current" title="Use the last generated image">Use current</button>
+              <button id="i2i-browse" title="Pick any image from disk">Browse…</button>
+            </div>
+            <div id="i2i-strength-row">
+              <span>Strength</span>
+              <input type="range" id="i2i-strength" min="5" max="100" step="5" value="75">
+              <span id="i2i-strength-val">75%</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div id="image-result-preview">
@@ -330,7 +349,7 @@
       <li><strong style="color: var(--accent-gold);">/xlsx &lt;topic&gt;</strong> : Create an Excel spreadsheet.</li>
       <li><strong style="color: var(--accent-gold);">/search &lt;query&gt;</strong> : Manually search the Second Brain vault.</li>
       <li><strong style="color: var(--accent-gold);">/reindex</strong> : Rebuild the RAG vector index (ChromaDB).</li>
-      <li><strong style="color: var(--accent-gold);">/sync_wiki</strong> : Download & Sync local Wikipedia for offline knowledge.</li>
+      <li><strong style="color: var(--accent-gold);">/wiki</strong> : Fetch Wikipedia articles for your vault notes and save them as cross-linked knowledge files.</li>
       <li><strong style="color: var(--accent-gold);">/consolidate</strong> : Ask the AI to refactor and link your Second Brain notes.</li>
       <li><strong style="color: var(--accent-gold);">/file &lt;path&gt;</strong> : Load any file (Code, PDF, Docx, Pptx, Xlsx) into context.</li>
       <li><strong style="color: var(--accent-gold);">/paste</strong> : Paste an image from the clipboard (or press F2).</li>

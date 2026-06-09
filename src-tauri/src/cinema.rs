@@ -39,6 +39,7 @@ pub async fn get_gpu_stats() -> Result<GpuStats, String> {
 #[tauri::command]
 pub async fn generate_video(
     app: tauri::AppHandle,
+    vram_queue: tauri::State<'_, crate::vram_queue::VramQueue>,
     prompt: String,
     duration: i32,
     quality: String,
@@ -49,6 +50,7 @@ pub async fn generate_video(
     seed: Option<i64>,
 ) -> Result<String, String> {
     let s = settings::load();
+    let _permit = vram_queue.acquire("Cinema Video").await?;
     
     // 1. Unload LLM
     let _ = crate::ollama::unload(&s.llm_model).await;

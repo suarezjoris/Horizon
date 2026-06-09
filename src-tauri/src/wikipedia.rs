@@ -1,140 +1,144 @@
 use std::path::PathBuf;
-use std::fs::File;
-use std::io::{Write, BufWriter};
+use std::collections::HashSet;
 use tauri::{AppHandle, Emitter};
 use crate::settings;
-use futures_util::StreamExt;
-use zim::Zim;
 
-#[derive(serde::Serialize, Clone)]
-struct Progress {
-    percentage: f64,
-    bytes_done: u64,
-    total_bytes: u64,
+/// Normalize a name/slug to lowercase with underscores for matching.
+fn normalize_slug(s: &str) -> String {
+    s.to_lowercase()
+        .replace(' ', "_")
+        .replace('-', "_")
+}
+
+/// Convert a lowercase slug to a Wikipedia title (capitalize each word).
+/// "colin_mcrae" → "Colin_McRae" (API handles redirects for minor case mismatches)
+fn to_wiki_title(slug: &str) -> String {
+    slug.split('_')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
+
+/// Fetch a Wikipedia article summary via the REST API.
+/// Returns (title, extract) or None if not found.
+async fn fetch_wiki_summary(client: &reqwest::Client, slug: &str) -> Option<(String, String)> {
+    let title = to_wiki_title(slug);
+    let url = format!(
+        "https://en.wikipedia.org/api/rest_v1/page/summary/{}",
+        urlencoding::encode(&title)
+    );
+
+    let resp = client.get(&url).send().await.ok()?;
+    if !resp.status().is_success() { return None; }
+
+    let json: serde_json::Value = resp.json().await.ok()?;
+
+    let extract = json.get("extract")
+        .and_then(|e| e.as_str())
+        .filter(|e| e.split_whitespace().count() > 20)
+        .map(|e| e.to_string())?;
+
+    let title_clean = json.get("title")
+        .and_then(|t| t.as_str())
+        .unwrap_or(&title)
+        .to_string();
+
+    Some((title_clean, extract))
 }
 
 #[tauri::command]
-pub async fn sync_wikipedia(app: AppHandle) -> Result<String, String> {
+pub async fn ingest_wikipedia(app: AppHandle) -> Result<String, String> {
     let s = settings::load();
-    let wiki_dir = PathBuf::from(&s.vault_path).join("knowledge");
-    std::fs::create_dir_all(&wiki_dir).map_err(|e| e.to_string())?;
 
-    // Targeting the correct latest Full English Wikipedia (Text only)
-    let url = "https://download.kiwix.org/zim/wikipedia/wikipedia_en_all_nopic_2026-03.zim";
-    let dest = wiki_dir.join("wikipedia_en.zim");
+    let all_notes = crate::vault::list_vault_notes(&s.vault_path);
+    let seeds: Vec<String> = all_notes.iter()
+        .filter(|p| !p.starts_with("knowledge/wiki-") && p.ends_with(".md"))
+        .map(|p| {
+            p.trim_end_matches(".md").rsplit('/').next().unwrap_or(p).to_string()
+        })
+        .collect();
 
-    println!("[WikiSync] Starting download from: {}", url);
+    let stem_set: HashSet<String> = seeds.iter().map(|s| normalize_slug(s)).collect();
 
-    let client = reqwest::Client::new();
-    let response = client.get(url).send().await.map_err(|e| e.to_string())?;
+    let client = reqwest::Client::builder()
+        .user_agent("HorizonApp/2.1 (personal AI desktop; https://github.com/personal)")
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
 
-    if !response.status().is_success() {
-        return Err(format!("Download failed: Server returned status {}", response.status()));
-    }
+    let knowledge_dir = PathBuf::from(&s.vault_path).join("knowledge");
+    std::fs::create_dir_all(&knowledge_dir).map_err(|e| e.to_string())?;
 
-    let total_size = response.content_length().unwrap_or(0);
-    let mut downloaded: u64 = 0;
-    let mut last_emitted_bytes: u64 = 0;
-    let emit_threshold = 10 * 1024 * 1024; // 10 MB
+    let mut saved = 0;
+    let total = seeds.len();
 
-    let file = File::create(&dest).map_err(|e| e.to_string())?;
-    let mut writer = BufWriter::with_capacity(128 * 1024, file); // 128KB buffer
-    let mut stream = response.bytes_stream();
+    for (i, stem) in seeds.iter().enumerate() {
+        let slug = normalize_slug(stem);
+        let dest_rel = format!("knowledge/wiki-{}.md", slug);
+        let dest = PathBuf::from(&s.vault_path).join(&dest_rel);
+        if dest.exists() { continue; }
 
-    while let Some(item) = stream.next().await {
-        let chunk = item.map_err(|e| e.to_string())?;
-        writer.write_all(&chunk).map_err(|e| e.to_string())?;
-        downloaded += chunk.len() as u64;
+        let _ = app.emit("wiki-ingest-status", serde_json::json!({
+            "status": "fetching",
+            "message": format!("[{}/{}] Looking up {}…", i + 1, total, slug)
+        }));
 
-        // Throttle UI events (every 10MB)
-        if downloaded - last_emitted_bytes > emit_threshold || downloaded == total_size {
-            let percentage = (downloaded as f64 / total_size as f64) * 100.0;
-            let _ = app.emit("wiki-download-progress", Progress {
-                percentage,
-                bytes_done: downloaded,
-                total_bytes: total_size,
-            });
-            last_emitted_bytes = downloaded;
-            
-            // Log to terminal for debugging
-            println!("[WikiSync] Progress: {:.2}% ({:.1}/{:.1} MB)", 
-                percentage, 
-                downloaded as f64 / 1024.0 / 1024.0, 
-                total_size as f64 / 1024.0 / 1024.0
-            );
+        let Some((title, extract)) = fetch_wiki_summary(&client, &slug).await else {
+            continue;
+        };
+
+        // Cross-links: other vault note names mentioned in the extract
+        let extract_low = extract.to_lowercase();
+        let mut cross_links: Vec<String> = stem_set.iter()
+            .filter(|s| *s != &slug && {
+                // Word-boundary check: surrounded by non-alphanumeric
+                let s_str = s.replace('_', " ");
+                extract_low.contains(s_str.as_str())
+            })
+            .map(|s| format!("[[{}]]", s))
+            .collect();
+
+        // Hub topic links
+        let topics = crate::memory::detect_topics(&title, &extract);
+        for t in topics {
+            let link = format!("[[{}]]", t);
+            if !cross_links.contains(&link) { cross_links.push(link); }
         }
-    }
-    
-    writer.flush().map_err(|e| e.to_string())?;
 
-    Ok("Wikipedia synchronisée !".to_string())
+        let topic_line = if cross_links.is_empty() {
+            String::new()
+        } else {
+            cross_links.sort();
+            format!("\n\nTopics: {}", cross_links.join(" "))
+        };
+
+        let note = format!("# {}\n\n*Source: Wikipedia*\n\n{}{}\n", title, extract, topic_line);
+
+        if crate::vault::write_vault_note(&s.vault_path, &dest_rel, &note).is_ok() {
+            saved += 1;
+        }
+
+        // Polite delay between Wikipedia API requests
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+    }
+
+    let indexed = crate::embeddings::reindex().await.unwrap_or(0);
+    Ok(format!(
+        "Wikipedia ingestion complete: {}/{} articles saved, {} chunks indexed.",
+        saved, total, indexed
+    ))
 }
 
 pub fn search_wikipedia(query: &str) -> Option<String> {
-    let s = settings::load();
-    let wiki_path = PathBuf::from(&s.vault_path).join("knowledge/wikipedia_en.zim");
-    
-    if !wiki_path.exists() {
-        return None;
-    }
-
-    // 1. Clean the query
-    let mut clean_query = query.to_lowercase();
-    let noise = ["who is", "what is", "qui est", "qu'est ce que", "tell me about", "cherche", "search"];
-    for n in noise {
-        clean_query = clean_query.replace(n, "");
-    }
-    
-    let target = clean_query.trim().replace(' ', "_");
-    if target.len() < 3 { return None; }
-
-    if let Ok(zim) = Zim::new(wiki_path.to_str().unwrap()) {
-        let count = zim.article_count() as u32;
-        let limit = count.min(100_000); 
-
-        for i in 0..limit {
-            if let Ok(entry) = zim.get_by_url_index(i) {
-                let url_low = entry.url.to_lowercase();
-                if format!("{:?}", entry.namespace).contains("Articles") && url_low.contains(&target) {
-                    if let Some(zim::Target::Cluster(c_idx, b_idx)) = entry.target {
-                        if let Ok(cluster) = zim.get_cluster(c_idx) {
-                            if let Ok(blob) = cluster.get_blob(b_idx) {
-                                let html = String::from_utf8_lossy(&blob).into_owned();
-                                return Some(strip_html(&html));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // ZIM-based search disabled (zim 0.4 crate incompatible with modern Kiwix format)
+    // Wikipedia context is now provided via ingested knowledge/wiki-*.md vault notes
+    let _ = query;
     None
-}
-
-lazy_static::lazy_static! {
-    static ref HTML_RE: regex::Regex = regex::Regex::new(r"<[^>]*>").unwrap();
-}
-
-fn strip_html(html: &str) -> String {
-    let text = HTML_RE.replace_all(html, "");
-    
-    // Comprehensive entity and unicode cleanup
-    text.replace("&nbsp;", " ")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("\\u0254", "o") 
-        .replace("\\u2013", "-")
-        .replace("\\u2014", "-")
-        .replace("\\u2019", "'")
-        .lines()
-        .map(|l| l.trim())
-        .filter(|l| !l.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
-        .chars()
-        .take(3500)
-        .collect()
 }

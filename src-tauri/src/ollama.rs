@@ -71,7 +71,7 @@ pub async fn chat_stream(
         buf.extend_from_slice(&chunk.map_err(|e| e.to_string())?);
         
         while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
-            let line = buf.drain(..=pos + 1).collect::<Vec<u8>>();
+            let line = buf.drain(..=pos).collect::<Vec<u8>>();
             if let Ok(c) = serde_json::from_slice::<ChatChunk>(&line) {
                 if !c.done {
                     let token = c.message.content;

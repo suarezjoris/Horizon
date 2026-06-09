@@ -16,8 +16,8 @@ function switchTab(name) {
     window.refreshGallery();
   }
   
-  if (name === 'code' && window.onCodeTabActive) {
-    window.onCodeTabActive(currentProjectPath);
+  if (name === 'armata' && window.onArmataTabActive) {
+    window.onArmataTabActive();
   }
 
   if (name === 'notes' && window.onNotesTabActive) {

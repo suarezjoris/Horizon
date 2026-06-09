@@ -735,6 +735,54 @@ body::after {
   box-shadow: 0 22px 50px rgba(0, 0, 0, 0.82);
 }
 
+/* ── img2img bar ──────────────────────────────────────────────────────────── */
+#i2i-bar {
+  margin-top: 10px;
+  border-top: 1px solid rgba(212,168,50,.18);
+  padding-top: 10px;
+}
+#i2i-toggle-label {
+  display: flex; align-items: center; gap: 8px;
+  cursor: pointer; font-size: 13px; color: var(--text-secondary);
+  user-select: none;
+}
+#i2i-toggle-label input { accent-color: var(--gold-bright); cursor: pointer; }
+#i2i-controls {
+  display: none;
+  flex-direction: column; gap: 8px;
+  margin-top: 10px;
+  background: rgba(0,0,0,.25);
+  border: 1px solid rgba(212,168,50,.2);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+#i2i-controls.active { display: flex; }
+#i2i-source-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+#i2i-thumb {
+  width: 48px; height: 48px; object-fit: cover;
+  border-radius: 6px; border: 1px solid rgba(212,168,50,.3);
+  display: none;
+}
+#i2i-thumb.active { display: block; }
+#i2i-source-name {
+  flex: 1; font-size: 12px; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;
+}
+#i2i-use-current, #i2i-browse {
+  padding: 4px 10px; font-size: 12px;
+  background: rgba(212,168,50,.12); border: 1px solid rgba(212,168,50,.3);
+  color: var(--gold-bright); border-radius: 6px; cursor: pointer;
+}
+#i2i-use-current:hover, #i2i-browse:hover { background: rgba(212,168,50,.25); }
+#i2i-strength-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--text-secondary);
+}
+#i2i-strength { flex: 1; accent-color: var(--gold-bright); cursor: pointer; }
+#i2i-strength-val { min-width: 34px; color: var(--gold-bright); font-weight: 600; }
+
 #gallery-header, #cinema-gallery-header {
   font-family: var(--font-display);
   font-size: 22px; font-weight: 700;
@@ -1651,7 +1699,7 @@ body::after {
   gap: 2px;
 }
 
-.log-line { opacity: 0.8; }
+.log-line { opacity: 0.8; overflow-wrap: break-word; word-break: break-word; }
 .log-line.log-cmd   { color: var(--accent-gold, #d4a84b); }
 .log-line.log-error { color: #f87171; }
 .log-line.log-warn  { color: #fb923c; }
@@ -1722,5 +1770,6 @@ body::after {
   display: none !important;
   flex-direction: column;
   gap: 24px;
+  overflow: hidden;
 }
 #panel-armata.active { display: flex !important; }

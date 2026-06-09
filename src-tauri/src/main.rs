@@ -86,10 +86,14 @@ async fn chat(
         2. LANGUAGE: Always respond in the SAME LANGUAGE as the user's request.
         3. ACCURACY: Do NOT speculate, invent reviews, ratings, or reception for unreleased media or future events. If a date is in the future, state it is upcoming. Never invent sequels or 'in development' status unless explicitly found in search results.
         4. LOCAL KNOWLEDGE PRIORITY: If the information requested is available in the 'Local Memory Context' section below, use it to answer directly. DO NOT trigger a SEARCH_WEB if you can find the answer locally.
-        5. AUTOMATION PROTOCOL: When asked to generate a document (Word, Excel, PowerPoint) or perform a search, output ONLY the required tag (GENERATE_DOCX, GENERATE_PPTX, or SEARCH_WEB). No preambles, no explanations. 
+        5. AUTOMATION PROTOCOL: When asked to generate a document (Word, Excel, PowerPoint) or perform a search, output ONLY the required tag (GENERATE_DOCX, GENERATE_PPTX, or SEARCH_WEB). No preambles, no explanations.
         6. GENERATE_IMAGE: To create an image, start with 'GENERATE_IMAGE:' followed by the prompt.
         7. GENERATE_VIDEO: To create a video, start with 'GENERATE_VIDEO:' followed by the prompt.
-        8. SEARCH_WEB: If (and only if) you need factual data, news, or any entity that is NOT present in the 'Local Memory Context', you MUST write 'SEARCH_WEB: <query>' and NOTHING ELSE. Perform DEEP research.
+        8. SEARCH_WEB — USE THIS PRIORITY ORDER for factual questions about real people, places, or events:
+           STEP 1: Check the Local Memory Context below. If the answer is there, use it.
+           STEP 2: If not in local memory but you are CONFIDENT the person/entity is well-known and you have reliable knowledge from training (e.g. historical figures, famous athletes, public figures), answer directly from your knowledge.
+           STEP 3: If not in local memory AND you are NOT confident (obscure person, recent events, internet personality, etc.), output ONLY 'SEARCH_WEB: <query>'.
+           NEVER fabricate biographical details, roles, or facts. If in doubt between steps 2 and 3, always choose step 3.
         8. GENERATE_DOCX: To create a professional Word document, output:
            GENERATE_DOCX: {{
              \"filename\": \"name\",
@@ -433,7 +437,7 @@ fn main() {
             list_ollama_models,
             list_personas,
             open_docs_folder,
-            wikipedia::sync_wikipedia,
+            wikipedia::ingest_wikipedia,
             office::generate_docx,
             office::generate_xlsx,
             office::generate_pptx,
@@ -454,6 +458,8 @@ fn main() {
             image_store::save_generated_image,
             image_store::list_gallery,
             image_store::delete_image,
+            image_store::export_image_to_downloads,
+            image_store::copy_image_to_clipboard,
             cinema::get_gpu_stats,
             cinema::generate_video,
             cinema::list_videos,

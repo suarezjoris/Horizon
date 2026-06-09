@@ -1,6 +1,7 @@
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use notify::{Watcher, RecursiveMode, EventKind};
 use tauri::{AppHandle, Emitter};
 
@@ -66,18 +67,34 @@ pub async fn run_archivist(app: AppHandle, running: Arc<AtomicBool>) {
         return;
     }
 
+    let mut pending: HashMap<PathBuf, Instant> = HashMap::new();
+
     while running.load(Ordering::Relaxed) {
-        match rx.recv_timeout(Duration::from_millis(500)) {
+        match rx.recv_timeout(Duration::from_millis(200)) {
             Ok(Ok(event)) => {
                 if matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
-                    for path in &event.paths {
-                        handle_new_file(&app, path, &vault_dir);
+                    for path in event.paths {
+                        if path.is_file() {
+                            pending.insert(path, Instant::now());
+                        }
                     }
                 }
             }
             Ok(Err(e)) => emit_status(&app, "warn", &format!("Watch error: {}", e)),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             Err(_) => break,
+        }
+
+        // Only process files that haven't changed for 1 second (fully written/closed)
+        let ready: Vec<PathBuf> = pending
+            .iter()
+            .filter(|(_, t)| t.elapsed() >= Duration::from_secs(1))
+            .map(|(p, _)| p.clone())
+            .collect();
+
+        for path in ready {
+            pending.remove(&path);
+            handle_new_file(&app, &path, &vault_dir);
         }
     }
 
@@ -103,7 +120,12 @@ fn handle_new_file(app: &AppHandle, path: &PathBuf, vault_dir: &PathBuf) {
     let dest = category_dir.join(&filename);
     if dest.exists() { return; }
 
-    match std::fs::rename(path, &dest) {
+    // Try atomic rename first; fall back to copy+delete for cross-device moves
+    let result = std::fs::rename(path, &dest).or_else(|_| {
+        std::fs::copy(path, &dest).and_then(|_| std::fs::remove_file(path))
+    });
+
+    match result {
         Ok(_) => emit_status(app, "online", &format!("Filed: {} → {}/", filename, category)),
         Err(e) => emit_status(app, "warn", &format!("Failed to move {}: {}", filename, e)),
     }

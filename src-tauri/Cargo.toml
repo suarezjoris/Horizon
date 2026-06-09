@@ -11,7 +11,7 @@ tauri = { version = "2", features = ["protocol-asset"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
 bincode = "1"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
@@ -29,7 +29,6 @@ tauri-plugin-shell = "2.0.0-rc"
 pdf-extract = "0.10.0"
 docx-rs = "0.4.15"
 rust_xlsxwriter = "0.78.0"
-zim = "0.4"
 lazy_static = "1.4.0"
 notify = "6"
 zip = { version = "2", default-features = false, features = ["deflate"] }

@@ -1,9 +1,16 @@
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 use tokio::time::sleep;
 use crate::{ollama, settings};
+
+#[derive(Serialize, Deserialize)]
+pub struct GenerateImageResult {
+    pub bytes: Vec<u8>,
+    pub comfyui_path: String,
+}
 
 pub struct ComfyManager {
     pub child: Option<Child>,
@@ -101,18 +108,57 @@ pub async fn interrupt_comfyui() -> Result<(), String> {
     Ok(())
 }
 
+async fn upload_image_to_comfyui(client: &Client, path: &str) -> Result<String, String> {
+    let data = std::fs::read(path).map_err(|e| format!("Cannot read source image: {}", e))?;
+    let filename = std::path::Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "input.png".to_string());
+
+    let part = reqwest::multipart::Part::bytes(data)
+        .file_name(filename)
+        .mime_str("image/png")
+        .map_err(|e| e.to_string())?;
+    let form = reqwest::multipart::Form::new()
+        .part("image", part)
+        .text("type", "input")
+        .text("overwrite", "true");
+
+    let resp = client
+        .post("http://127.0.0.1:8188/upload/image")
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("Upload failed: {}", e))?;
+
+    let body: Value = resp.json().await.map_err(|e| e.to_string())?;
+    body["name"].as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| format!("ComfyUI upload returned no name: {}", body))
+}
+
 #[tauri::command]
-pub async fn generate_image(prompt: String, engine: String) -> Result<Vec<u8>, String> {
+pub async fn generate_image(
+    vram_queue: tauri::State<'_, crate::vram_queue::VramQueue>,
+    prompt: String,
+    engine: String,
+    image_path: Option<String>,
+    strength: Option<f32>,
+) -> Result<GenerateImageResult, String> {
+    let _permit = vram_queue.acquire("ComfyUI Image").await?;
     let s = settings::load();
-    
+
+    let is_i2i = image_path.is_some();
+
     // 1. Unload Ollama to free VRAM
     let _ = ollama::unload(&s.llm_model).await;
 
     // 2. Load workflow template
-    let workflow_file = if engine == "flux" {
-        "comfyui-flux-workflow.json"
-    } else {
-        "comfyui-default-workflow.json"
+    let workflow_file = match (engine.as_str(), is_i2i) {
+        ("flux", true)  => "comfyui-flux-i2i-workflow.json",
+        ("flux", false) => "comfyui-flux-workflow.json",
+        (_,      true)  => "comfyui-pony-i2i-workflow.json",
+        (_,      false) => "comfyui-default-workflow.json",
     };
 
     let current_dir = std::env::current_dir().unwrap_or_default();
@@ -156,13 +202,21 @@ pub async fn generate_image(prompt: String, engine: String) -> Result<Vec<u8>, S
         return Err(format!("Workflow template missing at assets/{}. Tried: {:?}", workflow_file, workflow_path).into());
     };
 
-    // 3. Inject prompt and randomize seed
+    // 3. Upload source image if img2img, get ComfyUI filename
+    let client = Client::new();
+    let uploaded_name = if let Some(ref path) = image_path {
+        Some(upload_image_to_comfyui(&client, path).await?)
+    } else {
+        None
+    };
+
+    // 4. Inject prompt, seed, denoise, and source image name
     let mut found = false;
     let seed = chrono::Utc::now().timestamp_millis() as u64;
-    
+    let denoise = strength.unwrap_or(0.75).clamp(0.05, 1.0);
+
     if let Some(nodes) = workflow.as_object_mut() {
         for node in nodes.values_mut() {
-            // Randomize ANY field named "seed" or "noise_seed" in ANY node
             if let Some(inputs) = node["inputs"].as_object_mut() {
                 if inputs.contains_key("seed") {
                     inputs["seed"] = serde_json::json!(seed);
@@ -170,11 +224,22 @@ pub async fn generate_image(prompt: String, engine: String) -> Result<Vec<u8>, S
                 if inputs.contains_key("noise_seed") {
                     inputs["noise_seed"] = serde_json::json!(seed);
                 }
+                // Inject denoise for img2img
+                if is_i2i && inputs.contains_key("denoise") {
+                    inputs["denoise"] = serde_json::json!(denoise);
+                }
+                // Replace placeholder with uploaded filename in LoadImage node
+                if let Some(img_name) = &uploaded_name {
+                    if let Some(Value::String(s)) = inputs.get("image") {
+                        if s == "HORIZON_INPUT_IMAGE" {
+                            inputs["image"] = Value::String(img_name.clone());
+                        }
+                    }
+                }
             }
 
             if node["class_type"] == "CLIPTextEncode" {
                 if let Some(inputs) = node["inputs"].as_object_mut() {
-                    // Check if this is the positive prompt node (ours has "masterpiece" in template)
                     if let Some(text) = inputs.get("text").and_then(|v| v.as_str()) {
                         if text.contains("masterpiece") {
                             if engine == "flux" {
@@ -194,8 +259,7 @@ pub async fn generate_image(prompt: String, engine: String) -> Result<Vec<u8>, S
         return Err("Could not find CLIPTextEncode node in workflow".into());
     }
 
-    // 4. Submit to ComfyUI
-    let client = Client::new();
+    // 5. Submit to ComfyUI
     let resp = client
         .post("http://127.0.0.1:8188/prompt")
         .json(&serde_json::json!({ "prompt": workflow }))
@@ -250,16 +314,23 @@ pub async fn generate_image(prompt: String, engine: String) -> Result<Vec<u8>, S
         let img_resp = client
             .get("http://127.0.0.1:8188/view")
             .query(&[
-                ("filename", filename),
-                ("subfolder", subfolder),
-                ("type", img_type),
+                ("filename", &filename),
+                ("subfolder", &subfolder),
+                ("type", &img_type),
             ])
             .send()
             .await
             .map_err(|e| format!("Failed to download image: {}", e))?;
 
         let bytes = img_resp.bytes().await.map_err(|e| e.to_string())?;
-        Ok(bytes.to_vec())
+
+        let comfyui_output = dirs::home_dir()
+            .unwrap_or_default()
+            .join("Projects/Horizon/ComfyUI/output");
+        let sub = if subfolder.is_empty() { comfyui_output.clone() } else { comfyui_output.join(&subfolder) };
+        let comfyui_path = sub.join(&filename).to_string_lossy().into_owned();
+
+        Ok(GenerateImageResult { bytes: bytes.to_vec(), comfyui_path })
     } else {
         Err(format!("ComfyUI rejected the prompt: {}", body))
     }

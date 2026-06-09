@@ -38,17 +38,6 @@ async function refreshSelectors() {
 window.refreshSelectors = refreshSelectors;
 refreshSelectors();
 
-listen('wiki-download-progress', e => {
-    const p = e.payload;
-    const bubbles = document.querySelectorAll('.bubble.ai');
-    const lastBubble = bubbles[bubbles.length - 1];
-    if (lastBubble && (lastBubble.textContent.includes('Synchronisation') || lastBubble.innerHTML.includes('Sync Wikipedia'))) {
-        const mb = (p.bytes_done / 1024 / 1024).toFixed(1);
-        const total = (p.total_bytes / 1024 / 1024).toFixed(1);
-        const pct = p.percentage.toFixed(2);
-        lastBubble.innerHTML = `🌐 **Sync Wikipedia**: ${pct}% (${mb}/${total} Mo)<br><progress value="${p.percentage}" max="100" style="width:100%; height:8px;"></progress>`;
-    }
-});
 
 function addBubble(role, text) {
   const row = document.createElement('div');
@@ -217,13 +206,16 @@ async function send() {
       // Let the normal send logic handle it from here
     }
 
-    if (cmd === 'sync_wiki' || cmd === 'wiki') {
-      const bubble = addBubble('ai', 'Synchronisation de Wikipedia local... (6 Go)');
+    if (cmd === 'wiki' || cmd === 'learn_wiki') {
+      const bubble = addBubble('ai', 'Scanning Wikipedia for vault seeds… reading ZIM file, this may take a few minutes.');
+      listen('wiki-ingest-status', e => {
+        if (e.payload?.message) bubble.textContent = e.payload.message;
+      });
       try {
-        const msg = await invoke('sync_wikipedia');
+        const msg = await invoke('ingest_wikipedia');
         bubble.textContent = msg;
       } catch (err) {
-        bubble.textContent = `Erreur sync: ${err}`;
+        bubble.textContent = `Ingestion failed: ${err}`;
       }
       return;
     }
