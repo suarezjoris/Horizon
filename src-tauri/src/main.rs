@@ -357,6 +357,11 @@ async fn toggle_agent_daemon(
                         antenna::run_antenna(app_clone, flag_clone).await;
                     });
                 }
+                "forge" => {
+                    tokio::spawn(async move {
+                        forge_daemon::run_forge(app_clone, flag_clone).await;
+                    });
+                }
                 _ => return Err(format!("Unknown agent: {}", agent)),
             }
 
@@ -409,6 +414,13 @@ fn main() {
                 let f2 = flag.clone();
                 app.state::<ArmataState>().running_flags.lock().unwrap().insert("antenna".into(), flag);
                 tauri::async_runtime::spawn(async move { antenna::run_antenna(app2, f2).await; });
+            }
+            if s.agents.forge_enabled {
+                let flag = Arc::new(AtomicBool::new(true));
+                let app2 = handle.clone();
+                let f2 = flag.clone();
+                app.state::<ArmataState>().running_flags.lock().unwrap().insert("forge".into(), flag);
+                tauri::async_runtime::spawn(async move { forge_daemon::run_forge(app2, f2).await; });
             }
 
             Ok(())
