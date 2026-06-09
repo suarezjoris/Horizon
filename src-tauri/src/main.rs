@@ -22,6 +22,7 @@ mod vram_queue;
 mod archivist;
 mod vanguard;
 mod antenna;
+mod forge_daemon;
 
 use tauri::{Emitter, Manager};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
@@ -393,21 +394,21 @@ fn main() {
                 let app2 = handle.clone();
                 let f2 = flag.clone();
                 app.state::<ArmataState>().running_flags.lock().unwrap().insert("archivist".into(), flag);
-                tokio::spawn(async move { archivist::run_archivist(app2, f2).await; });
+                tauri::async_runtime::spawn(async move { archivist::run_archivist(app2, f2).await; });
             }
             if s.agents.vanguard_enabled {
                 let flag = Arc::new(AtomicBool::new(true));
                 let app2 = handle.clone();
                 let f2 = flag.clone();
                 app.state::<ArmataState>().running_flags.lock().unwrap().insert("vanguard".into(), flag);
-                tokio::spawn(async move { vanguard::run_vanguard(app2, f2).await; });
+                tauri::async_runtime::spawn(async move { vanguard::run_vanguard(app2, f2).await; });
             }
             if s.agents.antenna_enabled {
                 let flag = Arc::new(AtomicBool::new(true));
                 let app2 = handle.clone();
                 let f2 = flag.clone();
                 app.state::<ArmataState>().running_flags.lock().unwrap().insert("antenna".into(), flag);
-                tokio::spawn(async move { antenna::run_antenna(app2, f2).await; });
+                tauri::async_runtime::spawn(async move { antenna::run_antenna(app2, f2).await; });
             }
 
             Ok(())
