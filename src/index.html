@@ -67,9 +67,9 @@
       <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M9 13h6M9 17h4"/></svg>
       <span>Notes</span>
     </div>
-    <div class="tab" data-tab="code">
-      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 8l-4 4 4 4"/><path d="M15 8l4 4-4 4"/><path d="M13.5 6l-3 12"/></svg>
-      <span>Code</span>
+    <div class="tab" data-tab="armata">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      <span>Armata</span>
     </div>
   </div>
   <div id="sidebar-actions" style="display: flex; gap: 8px;">
@@ -238,16 +238,73 @@
     </div>
   </div>
 
-  <!-- Coding AI Panel -->
-  <div class="panel" id="panel-code">
-    <div id="oc-terminal-controls">
-      <span id="oc-current-path">Project: ~/Projects/Horizon</span>
-      <button id="oc-change-dir-btn">
-        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-        <span>Change Project</span>
-      </button>
+  <!-- ARMATA Command Center -->
+  <div class="panel" id="panel-armata">
+    <div id="armata-dashboard">
+
+      <div id="armata-header">
+        <div class="armata-title">ARMATA <span class="armata-version">v3.0</span></div>
+        <div id="armata-vram-bar">
+          <span class="armata-vram-label">GPU</span>
+          <div class="vram-track"><div class="vram-fill" id="armata-vram-fill"></div></div>
+          <span id="armata-vram-user">FREE</span>
+        </div>
+        <div id="armata-clock">00:00:00</div>
+      </div>
+
+      <div id="armata-grid">
+
+        <div class="agent-card" id="agent-archivist">
+          <div class="agent-header">
+            <span class="agent-icon">🧹</span>
+            <span class="agent-name">Archivist</span>
+            <div class="agent-toggle" title="Toggle Archivist daemon"><div class="toggle-btn"></div></div>
+          </div>
+          <div class="agent-status">Monitoring: ~/Downloads</div>
+          <div class="agent-log">IDLE</div>
+        </div>
+
+        <div class="agent-card" id="agent-vanguard">
+          <div class="agent-header">
+            <span class="agent-icon">📡</span>
+            <span class="agent-name">Vanguard</span>
+            <div class="agent-toggle" title="Toggle Vanguard daemon"><div class="toggle-btn"></div></div>
+          </div>
+          <div class="agent-status">RSS Intel Feeder</div>
+          <div class="agent-log">IDLE</div>
+        </div>
+
+        <div class="agent-card" id="agent-forge">
+          <div class="agent-header">
+            <span class="agent-icon">🔥</span>
+            <span class="agent-name">Forge</span>
+            <div class="agent-toggle agent-toggle--static active" title="Always online"><div class="toggle-btn"></div></div>
+          </div>
+          <div class="agent-status">Doc + Cinema Engine</div>
+          <div class="agent-log log-online">ONLINE</div>
+        </div>
+
+        <div class="agent-card" id="agent-antenna">
+          <div class="agent-header">
+            <span class="agent-icon">📱</span>
+            <span class="agent-name">Antenna</span>
+            <div class="agent-toggle" title="Toggle Antenna bridge"><div class="toggle-btn"></div></div>
+          </div>
+          <div class="agent-status">Mobile HTTP Bridge</div>
+          <div class="agent-log">IDLE</div>
+        </div>
+
+      </div>
+
+      <div id="armata-terminal">
+        <div id="armata-output">ARMATA Command Center initialized. Type a command below.</div>
+        <div id="armata-input-area">
+          <span class="armata-prompt">&gt;_</span>
+          <input type="text" id="armata-cmd-input" placeholder="sort files | scan news | open spotify | status …" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+
     </div>
-    <div id="oc-xterm-container"></div>
   </div>
 </div>
 
@@ -337,6 +394,7 @@
 <script src="modules/cinema.js"></script>
 <script src="modules/openclaude.js"></script>
 <script src="modules/notes.js"></script>
+<script src="modules/armata.js"></script>
 <script src="modules/onboarding.js"></script>
 <script src="main.js"></script>
 </body>
