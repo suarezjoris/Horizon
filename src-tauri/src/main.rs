@@ -23,6 +23,8 @@ mod archivist;
 mod vanguard;
 mod antenna;
 mod forge_daemon;
+mod wiki_daemon;
+mod tools;
 
 use tauri::{Emitter, Manager};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
@@ -58,12 +60,6 @@ async fn chat(
     // RAG: pull the most relevant vault chunks using emergent brain logic
     let mut context = memory::get_context(&user_msg).await;
 
-    // If context is still empty or short, try Local Wikipedia
-    if context.len() < 300 {
-        if let Some(wiki_content) = wikipedia::search_wikipedia(&user_msg) {
-            context.push_str(&format!("\n\n### [Local Wikipedia Knowledge]\n{}", wiki_content));
-        }
-    }
 
     // Load Persona / System Prompt
     let system_base = persona.and_then(|name| {
@@ -94,6 +90,7 @@ async fn chat(
            STEP 2: If not in local memory but you are CONFIDENT the person/entity is well-known and you have reliable knowledge from training (e.g. historical figures, famous athletes, public figures), answer directly from your knowledge.
            STEP 3: If not in local memory AND you are NOT confident (obscure person, recent events, internet personality, etc.), output ONLY 'SEARCH_WEB: <query>'.
            NEVER fabricate biographical details, roles, or facts. If in doubt between steps 2 and 3, always choose step 3.
+           AFTER RECEIVING 'WEB SEARCH RESULTS': You MUST write a complete, detailed response using those results. NEVER say you cannot access real-time information — the data is already in front of you. Use it fully.
         8. GENERATE_DOCX: To create a professional Word document, output:
            GENERATE_DOCX: {{
              \"filename\": \"name\",
@@ -148,8 +145,11 @@ async fn chat(
                         let clean_resp = search_re.replace(&response, "*(Recherche web effectuée)*").into_owned();
                         current_messages.push(serde_json::json!({"role": "assistant", "content": clean_resp}));
                         current_messages.push(serde_json::json!({
-                            "role": "user", 
-                            "content": format!("WEB SEARCH RESULTS:\n---\n{}\n---\nIMPORTANT: Information gathered. Now proceed with the user's request.", web_results)
+                            "role": "user",
+                            "content": format!(
+                                "WEB SEARCH RESULTS for query '{}':\n---\n{}\n---\n\nYou have live web data above. You MUST now write a complete, detailed response to the user's original request using these results. Do NOT say you cannot access real-time information — you just retrieved it. Do NOT refuse or hedge. Write the full answer now.",
+                                query, web_results
+                            )
                         }));
                         continue; 
                     },
@@ -211,9 +211,10 @@ async fn chat(
 
     let _ = app.emit("llm-done", &final_response);
 
-    // Extraction as background task
+    // Extraction as best-effort background task — skips if GPU is busy
+    let sema = vram_queue.semaphore();
     tokio::spawn(async move {
-        memory::extract_and_save(user_msg, final_response).await;
+        memory::extract_and_save(user_msg, final_response, sema).await;
     });
 
     Ok(())
@@ -366,6 +367,11 @@ async fn toggle_agent_daemon(
                         forge_daemon::run_forge(app_clone, flag_clone).await;
                     });
                 }
+                "wiki" => {
+                    tokio::spawn(async move {
+                        wiki_daemon::run_wiki_agent(app_clone, flag_clone).await;
+                    });
+                }
                 _ => return Err(format!("Unknown agent: {}", agent)),
             }
 
@@ -425,6 +431,13 @@ fn main() {
                 let f2 = flag.clone();
                 app.state::<ArmataState>().running_flags.lock().unwrap().insert("forge".into(), flag);
                 tauri::async_runtime::spawn(async move { forge_daemon::run_forge(app2, f2).await; });
+            }
+            if s.agents.wiki_enabled {
+                let flag = Arc::new(AtomicBool::new(true));
+                let app2 = handle.clone();
+                let f2 = flag.clone();
+                app.state::<ArmataState>().running_flags.lock().unwrap().insert("wiki".into(), flag);
+                tauri::async_runtime::spawn(async move { wiki_daemon::run_wiki_agent(app2, f2).await; });
             }
 
             Ok(())
