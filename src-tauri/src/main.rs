@@ -118,104 +118,279 @@ async fn chat(
     let mut current_messages = vec![serde_json::json!({"role": "system", "content": system.clone()})];
     current_messages.extend(messages.clone());
 
-    let mut final_response = String::new();
-    let mut iteration = 0;
-    const MAX_ITERATIONS: usize = 3;
+    const MAX_TOOL_CALLS: usize = 10;
 
-    // OPTIMIZATION: Compile regexes once outside the loop
-    let search_re = regex::Regex::new(r"(?si)SEARCH_WEB:\s*(.*)").unwrap();
-    let docx_re = regex::Regex::new(r"(?si)GENERATE_DOCX:\s*.*?(\{.*\})").unwrap();
-    let xlsx_re = regex::Regex::new(r"(?si)GENERATE_XLSX:\s*.*?(\{.*\})").unwrap();
-    let pptx_re = regex::Regex::new(r"(?si)GENERATE_PPTX:\s*.*?(\{.*\})").unwrap();
+    let use_tools = s.agents.force_agent_mode
+        || s.model_capabilities
+            .get(&active_model)
+            .map(|c| c.tool_calling)
+            .unwrap_or(false);
 
-    while iteration < MAX_ITERATIONS {
-        iteration += 1;
-        
-        // Internal steps are always non-streaming and silent to prevent leaks
-        let response = ollama::chat_once(current_messages.clone(), &active_model).await?;
-        final_response = response.clone();
+    if use_tools {
+        // === BOUCLE AGENTIQUE V4 ===
+        let workspace_path = s.agent_workspace.clone();
+        let workspace = std::path::Path::new(&workspace_path);
+        let include_bash = cfg!(target_os = "linux");
+        let tool_defs = tools::build_tool_definitions(include_bash);
 
-        if let Some(caps) = search_re.captures(&response) {
-            let query = caps.get(1).map_or("", |m| m.as_str().trim());
-            if !query.is_empty() {
-                let _ = app.emit("llm-token", "CLEAR_AND_SEARCH");
-                match search::duckduckgo_search(query).await {
-                    Ok(web_results) => {
-                        // CLEAN history: add assistant response WITHOUT the tag to prevent looping
-                        let clean_resp = search_re.replace(&response, "*(Recherche web effectuée)*").into_owned();
+        let ollama_tools: Vec<ollama::Tool> = tool_defs.iter().map(|t| {
+            ollama::Tool {
+                r#type: "function".into(),
+                function: ollama::ToolFunction {
+                    name: t["function"]["name"].as_str().unwrap_or("").to_string(),
+                    description: t["function"]["description"].as_str().unwrap_or("").to_string(),
+                    parameters: t["function"]["parameters"].clone(),
+                },
+            }
+        }).collect();
+
+        let mut tool_call_count = 0usize;
+        let mut error_count = 0usize;
+        let mut had_errors = false;
+
+        loop {
+            if tool_call_count >= MAX_TOOL_CALLS {
+                let _ = app.emit("llm-token", "\n\n*Agent: limite de 10 actions atteinte.*");
+                let _ = app.emit("llm-done", "");
+                return Ok(());
+            }
+
+            let _ = app.emit("agent-thinking", true);
+
+            let agent_msg = match ollama::chat_with_tools(
+                current_messages.clone(),
+                &ollama_tools,
+                &active_model,
+            ).await {
+                Ok(m) => m,
+                Err(e) => {
+                    let _ = app.emit("llm-token", format!("\n\n*Erreur Ollama: {}*", e));
+                    let _ = app.emit("llm-done", "");
+                    return Ok(());
+                }
+            };
+
+            let _ = app.emit("agent-thinking", false);
+
+            if let Some(tool_calls) = agent_msg.tool_calls {
+                if tool_calls.is_empty() {
+                    let _ = app.emit("llm-done", "");
+                    return Ok(());
+                }
+
+                current_messages.push(serde_json::json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": tool_calls.iter().map(|tc| serde_json::json!({
+                        "function": { "name": tc.function.name, "arguments": tc.function.arguments }
+                    })).collect::<Vec<_>>()
+                }));
+
+                for tc in &tool_calls {
+                    tool_call_count += 1;
+
+                    let _ = app.emit("agent-tool-start", serde_json::json!({
+                        "tool": &tc.function.name,
+                        "args": &tc.function.arguments
+                    }));
+
+                    let t0 = std::time::Instant::now();
+                    let result = tools::execute(
+                        &tc.function.name,
+                        &tc.function.arguments,
+                        workspace,
+                    ).await;
+                    let ms = t0.elapsed().as_millis();
+
+                    match result {
+                        Ok(output) => {
+                            error_count = 0;
+                            let _ = app.emit("agent-tool-done", serde_json::json!({
+                                "tool": &tc.function.name,
+                                "result": &output,
+                                "ms": ms
+                            }));
+                            current_messages.push(serde_json::json!({
+                                "role": "tool",
+                                "name": &tc.function.name,
+                                "content": output
+                            }));
+                        }
+                        Err(e) => {
+                            let is_guidance_error = e.contains("edit_file");
+                            if !is_guidance_error {
+                                error_count += 1;
+                                had_errors = true;
+                            }
+
+                            let _ = app.emit("agent-tool-error", serde_json::json!({
+                                "tool": &tc.function.name,
+                                "error": &e
+                            }));
+
+                            current_messages.push(serde_json::json!({
+                                "role": "tool",
+                                "name": &tc.function.name,
+                                "content": format!("Error: {}", e)
+                            }));
+
+                            if error_count >= 3 {
+                                let _ = app.emit("llm-token",
+                                    "\n\n*Agent interrompu après 3 erreurs consécutives.*");
+                                let _ = app.emit("llm-done", "");
+                                let sema = vram_queue.semaphore();
+                                let um = user_msg.clone();
+                                tokio::spawn(async move {
+                                    memory::extract_and_save(
+                                        um,
+                                        format!("Agent failed with {} consecutive errors: {}", error_count, e),
+                                        sema,
+                                    ).await;
+                                });
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+            } else if let Some(ref content) = agent_msg.content {
+                // Check for malformed tool call smuggled as plain text
+                let looks_like_bad_tool_call = content.trim_start().starts_with('{')
+                    && (content.contains("\"name\"") || content.contains("tool_call"))
+                    && !content.contains('\n');
+
+                if looks_like_bad_tool_call {
+                    error_count += 1;
+                    had_errors = true;
+                    current_messages.push(serde_json::json!({
+                        "role": "user",
+                        "content": "Error: Invalid JSON schema for tool call. Please use the tool_calls field, not raw text."
+                    }));
+                    if error_count >= 3 {
+                        let _ = app.emit("llm-token", "\n\n*Agent interrompu après 3 erreurs.*");
+                        let _ = app.emit("llm-done", "");
+                        return Ok(());
+                    }
+                    continue;
+                }
+
+                // Final text response — stream it
+                let final_text = content.clone();
+                current_messages.push(serde_json::json!({
+                    "role": "assistant",
+                    "content": &final_text
+                }));
+                ollama::chat_stream(app.clone(), current_messages.clone(), &active_model, false).await?;
+                let _ = app.emit("llm-done", "");
+
+                if had_errors {
+                    let sema = vram_queue.semaphore();
+                    let um = user_msg.clone();
+                    tokio::spawn(async move {
+                        memory::extract_and_save(um, final_text, sema).await;
+                    });
+                }
+                return Ok(());
+            } else {
+                let _ = app.emit("llm-done", "");
+                return Ok(());
+            }
+        }
+    } else {
+        // === FALLBACK LEGACY (tag-based) ===
+        let mut final_response = String::new();
+        let mut iteration = 0;
+        const MAX_ITERATIONS: usize = 3;
+
+        let search_re = regex::Regex::new(r"(?si)SEARCH_WEB:\s*(.*)").unwrap();
+        let docx_re = regex::Regex::new(r"(?si)GENERATE_DOCX:\s*.*?(\{.*\})").unwrap();
+        let xlsx_re = regex::Regex::new(r"(?si)GENERATE_XLSX:\s*.*?(\{.*\})").unwrap();
+        let pptx_re = regex::Regex::new(r"(?si)GENERATE_PPTX:\s*.*?(\{.*\})").unwrap();
+
+        while iteration < MAX_ITERATIONS {
+            iteration += 1;
+
+            let response = ollama::chat_once(current_messages.clone(), &active_model).await?;
+            final_response = response.clone();
+
+            if let Some(caps) = search_re.captures(&response) {
+                let query = caps.get(1).map_or("", |m| m.as_str().trim());
+                if !query.is_empty() {
+                    let _ = app.emit("llm-token", "CLEAR_AND_SEARCH");
+                    match search::duckduckgo_search(query).await {
+                        Ok(web_results) => {
+                            let clean_resp = search_re.replace(&response, "*(Recherche web effectuée)*").into_owned();
+                            current_messages.push(serde_json::json!({"role": "assistant", "content": clean_resp}));
+                            current_messages.push(serde_json::json!({
+                                "role": "user",
+                                "content": format!(
+                                    "WEB SEARCH RESULTS for query '{}':\n---\n{}\n---\n\nYou have live web data above. You MUST now write a complete, detailed response to the user's original request using these results. Do NOT say you cannot access real-time information — you just retrieved it. Do NOT refuse or hedge. Write the full answer now.",
+                                    query, web_results
+                                )
+                            }));
+                            continue;
+                        },
+                        Err(e) => {
+                            let _ = app.emit("llm-token", format!("\n\n*⚠️ Search failed: {}*\n\n", e));
+                        }
+                    }
+                }
+            } else if let Some(caps) = pptx_re.captures(&response) {
+                let json_str = caps.get(1).map_or("", |m| m.as_str().trim());
+                if let Ok(content) = serde_json::from_str::<office::PptxContent>(json_str) {
+                    if let Ok(path) = office::generate_pptx(content).await {
+                        let filename = std::path::Path::new(&path).file_name().unwrap_or_default().to_string_lossy();
+                        let _ = app.emit("llm-token", format!("OFFICE_GEN_SUCCESS:{}", path));
+                        let clean_resp = pptx_re.replace(&response, "*(Présentation PowerPoint générée)*").into_owned();
                         current_messages.push(serde_json::json!({"role": "assistant", "content": clean_resp}));
                         current_messages.push(serde_json::json!({
-                            "role": "user",
-                            "content": format!(
-                                "WEB SEARCH RESULTS for query '{}':\n---\n{}\n---\n\nYou have live web data above. You MUST now write a complete, detailed response to the user's original request using these results. Do NOT say you cannot access real-time information — you just retrieved it. Do NOT refuse or hedge. Write the full answer now.",
-                                query, web_results
-                            )
+                            "role": "system",
+                            "content": format!("Success: PowerPoint at {}. Now, briefly inform the user in their language.", filename)
                         }));
-                        continue; 
-                    },
-                    Err(e) => {
-                        let _ = app.emit("llm-token", format!("\n\n*⚠️ Search failed: {}*\n\n", e));
+                        continue;
+                    }
+                }
+            } else if let Some(caps) = docx_re.captures(&response) {
+                let json_str = caps.get(1).map_or("", |m| m.as_str().trim());
+                if let Ok(content) = serde_json::from_str::<office::DocxContent>(json_str) {
+                    if let Ok(path) = office::generate_docx(content).await {
+                        let filename = std::path::Path::new(&path).file_name().unwrap_or_default().to_string_lossy();
+                        let _ = app.emit("llm-token", format!("OFFICE_GEN_SUCCESS:{}", path));
+                        let clean_resp = docx_re.replace(&response, "*(Document Word généré)*").into_owned();
+                        current_messages.push(serde_json::json!({"role": "assistant", "content": clean_resp}));
+                        current_messages.push(serde_json::json!({
+                            "role": "system",
+                            "content": format!("Success: Word document ready at {}. Now, briefly inform the user in their language.", filename)
+                        }));
+                        continue;
+                    }
+                }
+            } else if let Some(caps) = xlsx_re.captures(&response) {
+                let json_str = caps.get(1).map_or("", |m| m.as_str().trim());
+                if let Ok(content) = serde_json::from_str::<office::XlsxContent>(json_str) {
+                    if let Ok(path) = office::generate_xlsx(content).await {
+                        let _ = app.emit("llm-token", format!("OFFICE_GEN_SUCCESS:{}", path));
+                        let clean_resp = xlsx_re.replace(&response, "*(Tableur Excel généré)*").into_owned();
+                        current_messages.push(serde_json::json!({"role": "assistant", "content": clean_resp}));
+                        current_messages.push(serde_json::json!({
+                            "role": "system",
+                            "content": "Success: Excel file ready. Now briefly inform the user in their language."
+                        }));
+                        continue;
                     }
                 }
             }
-        } else if let Some(caps) = pptx_re.captures(&response) {
-            let json_str = caps.get(1).map_or("", |m| m.as_str().trim());
-            if let Ok(content) = serde_json::from_str::<office::PptxContent>(json_str) {
-                if let Ok(path) = office::generate_pptx(content).await {
-                    let filename = std::path::Path::new(&path).file_name().unwrap_or_default().to_string_lossy();
-                    let _ = app.emit("llm-token", format!("OFFICE_GEN_SUCCESS:{}", path)); 
-                    let clean_resp = pptx_re.replace(&response, "*(Présentation PowerPoint générée)*").into_owned();
-                    current_messages.push(serde_json::json!({"role": "assistant", "content": clean_resp}));
-                    current_messages.push(serde_json::json!({
-                        "role": "system", 
-                        "content": format!("Success: PowerPoint at {}. Now, briefly inform the user in their language.", filename)
-                    }));
-                    continue;
-                }
-            }
-        } else if let Some(caps) = docx_re.captures(&response) {
-            let json_str = caps.get(1).map_or("", |m| m.as_str().trim());
-            if let Ok(content) = serde_json::from_str::<office::DocxContent>(json_str) {
-                if let Ok(path) = office::generate_docx(content).await {
-                    let filename = std::path::Path::new(&path).file_name().unwrap_or_default().to_string_lossy();
-                    let _ = app.emit("llm-token", format!("OFFICE_GEN_SUCCESS:{}", path)); 
-                    let clean_resp = docx_re.replace(&response, "*(Document Word généré)*").into_owned();
-                    current_messages.push(serde_json::json!({"role": "assistant", "content": clean_resp}));
-                    current_messages.push(serde_json::json!({
-                        "role": "system", 
-                        "content": format!("Success: Word document ready at {}. Now, briefly inform the user in their language.", filename)
-                    }));
-                    continue;
-                }
-            }
-        } else if let Some(caps) = xlsx_re.captures(&response) {
-            let json_str = caps.get(1).map_or("", |m| m.as_str().trim());
-            if let Ok(content) = serde_json::from_str::<office::XlsxContent>(json_str) {
-                if let Ok(path) = office::generate_xlsx(content).await {
-                    let _ = app.emit("llm-token", format!("OFFICE_GEN_SUCCESS:{}", path)); 
-                    let clean_resp = xlsx_re.replace(&response, "*(Tableur Excel généré)*").into_owned();
-                    current_messages.push(serde_json::json!({"role": "assistant", "content": clean_resp}));
-                    current_messages.push(serde_json::json!({
-                        "role": "system", 
-                        "content": "Success: Excel file ready. Now briefly inform the user in their language."
-                    }));
-                    continue;
-                }
-            }
+
+            final_response = ollama::chat_stream(app.clone(), current_messages.clone(), &active_model, false).await?;
+            break;
         }
-        
-        // Final response: use streaming for a smooth conversational end
-        final_response = ollama::chat_stream(app.clone(), current_messages.clone(), &active_model, false).await?;
-        break; 
+
+        let _ = app.emit("llm-done", &final_response);
+
+        let sema = vram_queue.semaphore();
+        tokio::spawn(async move {
+            memory::extract_and_save(user_msg, final_response, sema).await;
+        });
     }
-
-    let _ = app.emit("llm-done", &final_response);
-
-    // Extraction as best-effort background task — skips if GPU is busy
-    let sema = vram_queue.semaphore();
-    tokio::spawn(async move {
-        memory::extract_and_save(user_msg, final_response, sema).await;
-    });
 
     Ok(())
 }
@@ -223,6 +398,28 @@ async fn chat(
 #[tauri::command]
 async fn list_ollama_models() -> Result<Vec<String>, String> {
     ollama::list_models().await
+}
+
+#[tauri::command]
+async fn probe_model_capabilities(model: String) -> Result<bool, String> {
+    let mut s = settings::load();
+    let hash = ollama::get_model_hash(&model).await.unwrap_or_default();
+
+    if let Some(cached) = s.model_capabilities.get(&model) {
+        if cached.hash == hash {
+            return Ok(cached.tool_calling);
+        }
+    }
+
+    let capable = tools::probe_tool_calling(&model).await;
+
+    s.model_capabilities.insert(model.clone(), settings::ModelCapability {
+        tool_calling: capable,
+        hash,
+    });
+    settings::save_settings(s)?;
+
+    Ok(capable)
 }
 
 #[tauri::command]
@@ -448,6 +645,7 @@ fn main() {
             chat,
             reset_system,
             list_ollama_models,
+            probe_model_capabilities,
             list_personas,
             open_docs_folder,
             wikipedia::ingest_wikipedia,

@@ -1,5 +1,12 @@
 use std::path::{Component, Path, PathBuf};
 
+fn floor_char_boundary(s: &str, index: usize) -> usize {
+    if index >= s.len() { return s.len(); }
+    let mut i = index;
+    while i > 0 && !s.is_char_boundary(i) { i -= 1; }
+    i
+}
+
 pub fn safe_join(workspace: &Path, requested: &Path) -> Result<PathBuf, String> {
     if requested.is_absolute() {
         return Err("Access denied: absolute path not allowed".into());
@@ -29,17 +36,18 @@ pub fn read_file(workspace: &Path, path: &str, offset: Option<usize>) -> Result<
     let abs = safe_join(workspace, Path::new(path))?;
     let content = std::fs::read_to_string(&abs)
         .map_err(|e| format!("Cannot read '{}': {}", path, e))?;
-    let start = offset.unwrap_or(0).min(content.len());
+    let start = floor_char_boundary(&content, offset.unwrap_or(0).min(content.len()));
     let slice = &content[start..];
     if slice.len() <= READ_LIMIT {
         Ok(slice.to_string())
     } else {
+        let cut = floor_char_boundary(slice, READ_LIMIT);
         let total_kb = content.len() / 1024;
         Ok(format!(
             "{}\n[OUTPUT TRUNCATED — 8 KB shown of {} KB total. Call read_file with offset={} to continue.]",
-            &slice[..READ_LIMIT],
+            &slice[..cut],
             total_kb,
-            start + READ_LIMIT
+            start + cut
         ))
     }
 }
@@ -106,7 +114,10 @@ pub async fn bash(workspace: &Path, command: &str) -> Result<String, String> {
             "--ro-bind",     "/lib",  "/lib",
             "--ro-bind",     "/lib64","/lib64",
             "--tmpfs",       "/tmp",
+            "--proc",        "/proc",
             "--unshare-net",
+            "--unshare-pid",
+            "--unshare-ipc",
             "--die-with-parent",
             "--",
             "bash", "-c", command,
@@ -129,10 +140,11 @@ pub async fn bash(workspace: &Path, command: &str) -> Result<String, String> {
     if result.len() <= BASH_LIMIT {
         Ok(result)
     } else {
+        let cut = floor_char_boundary(&result, BASH_LIMIT);
         let total_kb = result.len() / 1024;
         Ok(format!(
             "{}\n[OUTPUT TRUNCATED — 4 KB shown of {} KB total.]",
-            &result[..BASH_LIMIT],
+            &result[..cut],
             total_kb
         ))
     }

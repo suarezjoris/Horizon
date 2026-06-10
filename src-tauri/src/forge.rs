@@ -1,6 +1,6 @@
 use tauri::{AppHandle, Emitter};
 use serde::{Deserialize, Serialize};
-use crate::{ollama, search, wikipedia, office, settings};
+use crate::{ollama, search, settings, tools};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ForgeStep {
@@ -48,10 +48,10 @@ pub async fn execute_forge(app: AppHandle, goal: String) -> Result<String, Strin
 
         RULES:
         - Output ONLY a JSON object: {{ \"steps\": [ {{ \"task\": \"...\", \"query\": \"...\" }} ] }}
-        - Available tasks: \"search_wiki\", \"search_web\", \"write_docx\", \"write_pptx\", \"write_xlsx\".
+        - Available tasks: \"search_web\", \"write_docx\", \"write_pptx\", \"write_xlsx\".
         - Be efficient. Group research before writing.
 
-        Example output: {{ \"steps\": [ {{ \"task\": \"search_wiki\", \"query\": \"Code Lyoko\" }}, {{ \"task\": \"write_docx\", \"filename\": \"report\" }} ] }}",
+        Example output: {{ \"steps\": [ {{ \"task\": \"search_web\", \"query\": \"Code Lyoko\" }}, {{ \"task\": \"write_docx\", \"filename\": \"report\" }} ] }}",
         goal
     );
 
@@ -62,67 +62,91 @@ pub async fn execute_forge(app: AppHandle, goal: String) -> Result<String, Strin
     let total_steps = plan.steps.len();
     let mut context_buffer = String::new();
 
-    // 2. Execution Loop
-    for (i, step) in plan.steps.iter().enumerate() {
+    // 2a. Research phase — all search_web steps run in parallel
+    let research_steps: Vec<_> = plan.steps.iter()
+        .filter(|s| s.task == "search_web")
+        .cloned()
+        .collect();
+    let research_count = research_steps.len();
+
+    if research_count > 0 {
         let _ = app.emit("forge-progress", ForgeProgress {
-            step_index: i + 1,
+            step_index: 1,
+            total_steps,
+            message: format!("Researching ({} sources in parallel)...", research_count),
+            done: false,
+        });
+
+        let handles: Vec<_> = research_steps.into_iter().map(|step| {
+            tokio::spawn(async move {
+                let q = step.query.unwrap_or_default();
+                search::duckduckgo_search(&q).await
+                    .map(|res| format!("\n### [Web Search: {}]\n{}\n", q, res))
+                    .unwrap_or_default()
+            })
+        }).collect();
+
+        for handle in futures_util::future::join_all(handles).await {
+            if let Ok(text) = handle {
+                context_buffer.push_str(&text);
+            }
+        }
+    }
+
+    // 2b. Write phase — sequential, uses accumulated context
+    let write_steps: Vec<_> = plan.steps.iter()
+        .filter(|s| s.task != "search_web")
+        .collect();
+
+    for (i, step) in write_steps.iter().enumerate() {
+        let _ = app.emit("forge-progress", ForgeProgress {
+            step_index: research_count + i + 1,
             total_steps,
             message: format!("Executing step: {}...", step.task),
             done: false,
         });
 
         match step.task.as_str() {
-            "search_wiki" => {
-                if let Some(q) = &step.query {
-                    if let Some(res) = wikipedia::search_wikipedia(q) {
-                        context_buffer.push_str(&format!("\n### [Wikipedia: {}]\n{}\n", q, res));
-                    }
-                }
-            },
-            "search_web" => {
-                if let Some(q) = &step.query {
-                    if let Ok(res) = search::duckduckgo_search(q).await {
-                        context_buffer.push_str(&format!("\n### [Web Search: {}]\n{}\n", q, res));
-                    }
-                }
-            },
             "write_docx" | "write_pptx" | "write_xlsx" => {
-                let tag_name = match step.task.as_str() {
-                    "write_docx" => "GENERATE_DOCX",
-                    "write_pptx" => "GENERATE_PPTX",
-                    "write_xlsx" => "GENERATE_XLSX",
-                    _ => "GENERATE_DOCX",
+                let tool_name = match step.task.as_str() {
+                    "write_docx" => "generate_docx",
+                    "write_pptx" => "generate_pptx",
+                    "write_xlsx" => "generate_xlsx",
+                    _            => unreachable!(),
                 };
 
-                let schema_example = match step.task.as_str() {
-                    "write_docx" => "{ \"filename\": \"...\", \"title\": \"...\", \"elements\": [ { \"type\": \"heading\", \"level\": 1, \"text\": \"...\" }, { \"type\": \"paragraph\", \"text\": \"...\" } ] }",
-                    "write_pptx" => "{ \"filename\": \"...\", \"title\": \"...\", \"slides\": [ { \"title\": \"Slide Title\", \"intro\": \"Summary\", \"bullets\": [\"fact 1\", \"fact 2\"] } ] }",
-                    "write_xlsx" => "{ \"filename\": \"...\", \"sheets\": [ { \"name\": \"Sheet1\", \"rows\": [[\"A1\", \"B1\"], [\"Val1\", \"Val2\"]] } ] }",
-                    _ => "",
+                let schema_hint = match step.task.as_str() {
+                    "write_docx" => r#"{"filename":"...","title":"...","elements":[{"type":"heading","level":1,"text":"..."},{"type":"paragraph","text":"..."}]}"#,
+                    "write_pptx" => r#"{"filename":"...","title":"...","slides":[{"title":"...","intro":"...","bullets":["..."]}]}"#,
+                    "write_xlsx" => r#"{"filename":"...","sheets":[{"name":"Sheet1","rows":[["Col1","Col2"],["Val1","Val2"]]}]}"#,
+                    _            => unreachable!(),
                 };
 
                 let writer_prompt = format!(
-                    "You are the Lead Forge Writer. Your task is to generate a professional {} based on the context provided.
-                    
-                    CONTEXT:
-                    {}
-
-                    CRITICAL SCHEMA RULES:
-                    - You MUST output the full command: {}: {}
-                    - Do NOT use 'elements' for PowerPoint; use 'slides'.
-                    - Do NOT use 'elements' for Excel; use 'sheets'.
-                    - Output ONLY the command. No text before or after.",
-                    step.task, context_buffer, tag_name, schema_example
+                    "You are the Forge Writer. Generate a {} based on the context.\n\nCONTEXT:\n{}\n\nOutput ONLY valid JSON matching this schema (no prose, no markdown):\n{}",
+                    step.task, context_buffer, schema_hint
                 );
 
-                println!("[Forge] Requesting production for: {}", step.task);
-                let writer_resp = ollama::chat_once(vec![serde_json::json!({"role": "user", "content": writer_prompt})], model).await?;
-                println!("[Forge] Writer responded (length {}): {}", writer_resp.len(), writer_resp);
-                
-                if !handle_production_tag(&app, &writer_resp).await? {
-                    return Err(format!("The AI failed to generate a valid {} command. It responded: {}", tag_name, writer_resp));
-                }
-            },
+                let resp = ollama::chat_once(
+                    vec![serde_json::json!({"role": "user", "content": writer_prompt})],
+                    model,
+                ).await?;
+
+                let json_str = {
+                    let r = resp.trim();
+                    let start = r.find('{').unwrap_or(0);
+                    let end = r.rfind('}').map(|i| i + 1).unwrap_or(r.len());
+                    r[start..end].to_string()
+                };
+
+                let args: serde_json::Value = serde_json::from_str(&json_str)
+                    .map_err(|e| format!("Forge JSON parse error for {}: {}", tool_name, e))?;
+
+                let ws_path = settings::load().agent_workspace;
+                let workspace = std::path::Path::new(&ws_path);
+                let path = tools::execute(tool_name, &args, workspace).await?;
+                let _ = app.emit("llm-token", format!("OFFICE_GEN_SUCCESS:{}", path));
+            }
             _ => return Err(format!("Unknown task: {}", step.task)),
         }
     }
@@ -137,30 +161,3 @@ pub async fn execute_forge(app: AppHandle, goal: String) -> Result<String, Strin
     Ok("Forge execution complete.".to_string())
 }
 
-async fn handle_production_tag(app: &AppHandle, resp: &str) -> Result<bool, String> {
-    let docx_re = regex::Regex::new(r"(?si)GENERATE_DOCX:\s*.*?(\{.*\})").unwrap();
-    let xlsx_re = regex::Regex::new(r"(?si)GENERATE_XLSX:\s*.*?(\{.*\})").unwrap();
-    let pptx_re = regex::Regex::new(r"(?si)GENERATE_PPTX:\s*.*?(\{.*\})").unwrap();
-
-    if let Some(caps) = docx_re.captures(resp) {
-        let json_str = caps.get(1).map_or("", |m| m.as_str().trim());
-        let content = serde_json::from_str(json_str).map_err(|e| format!("Word JSON Error: {}", e))?;
-        let path = office::generate_docx(content).await?;
-        let _ = app.emit("llm-token", format!("OFFICE_GEN_SUCCESS:{}", path));
-        return Ok(true);
-    } else if let Some(caps) = xlsx_re.captures(resp) {
-        let json_str = caps.get(1).map_or("", |m| m.as_str().trim());
-        let content = serde_json::from_str(json_str).map_err(|e| format!("Excel JSON Error: {}", e))?;
-        let path = office::generate_xlsx(content).await?;
-        let _ = app.emit("llm-token", format!("OFFICE_GEN_SUCCESS:{}", path));
-        return Ok(true);
-    } else if let Some(caps) = pptx_re.captures(resp) {
-        let json_str = caps.get(1).map_or("", |m| m.as_str().trim());
-        let content = serde_json::from_str(json_str).map_err(|e| format!("PowerPoint JSON Error: {}", e))?;
-        let path = office::generate_pptx(content).await?;
-        let _ = app.emit("llm-token", format!("OFFICE_GEN_SUCCESS:{}", path));
-        return Ok(true);
-    }
-
-    Ok(false)
-}

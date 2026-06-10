@@ -236,6 +236,19 @@ pub async fn unload(model: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub async fn get_model_hash(model: &str) -> Result<String, String> {
+    let resp = HTTP_CLIENT
+        .post("http://localhost:11434/api/show")
+        .json(&serde_json::json!({ "name": model }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(resp["digest"].as_str().unwrap_or("").to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
