@@ -1,5 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use once_cell::sync::Lazy;
+use std::sync::RwLock;
+use std::collections::HashMap;
+
+static CACHE: Lazy<RwLock<Option<Settings>>> = Lazy::new(|| RwLock::new(None));
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSettings {
@@ -7,6 +12,7 @@ pub struct AgentSettings {
     pub vanguard_enabled: bool,
     pub antenna_enabled: bool,
     pub forge_enabled: bool,
+    pub wiki_enabled: bool,
     /// Bearer token required for Antenna HTTP requests
     pub antenna_token: String,
     pub antenna_port: u16,
@@ -16,6 +22,7 @@ pub struct AgentSettings {
     pub light_model: String,
     /// RSS URLs for Vanguard to monitor
     pub vanguard_feeds: Vec<String>,
+    pub force_agent_mode: bool,
 }
 
 impl Default for AgentSettings {
@@ -25,6 +32,7 @@ impl Default for AgentSettings {
             vanguard_enabled: true,
             antenna_enabled: false,
             forge_enabled: true,
+            wiki_enabled: true,
             antenna_token: "changeme".to_string(),
             antenna_port: 8374,
             vanguard_interval_minutes: 30,
@@ -33,8 +41,15 @@ impl Default for AgentSettings {
                 "https://news.ycombinator.com/rss".to_string(),
                 "https://feeds.feedburner.com/TheHackersNews".to_string(),
             ],
+            force_agent_mode: false,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelCapability {
+    pub tool_calling: bool,
+    pub hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +61,8 @@ pub struct Settings {
     pub embeddings_path: String,
     pub image_rating: String,
     pub agents: AgentSettings,
+    pub agent_workspace: String,
+    pub model_capabilities: HashMap<String, ModelCapability>,
 }
 
 impl Default for Settings {
@@ -60,6 +77,15 @@ impl Default for Settings {
             embeddings_path: data.join("horizon/embeddings.bin").to_string_lossy().into_owned(),
             image_rating: "rating_safe".to_string(),
             agents: AgentSettings::default(),
+            agent_workspace: {
+                let p = home.join("Projects/Horizon/workspace");
+                std::fs::create_dir_all(&p).ok();
+                std::fs::canonicalize(&p)
+                    .unwrap_or(p)
+                    .to_string_lossy()
+                    .into_owned()
+            },
+            model_capabilities: HashMap::new(),
         }
     }
 }
@@ -69,11 +95,24 @@ fn config_path() -> PathBuf {
 }
 
 pub fn load() -> Settings {
+    if let Ok(cache) = CACHE.read() {
+        if let Some(ref s) = *cache {
+            return s.clone();
+        }
+    }
+    let s = load_from_disk();
+    if let Ok(mut cache) = CACHE.write() {
+        *cache = Some(s.clone());
+    }
+    s
+}
+
+fn load_from_disk() -> Settings {
     let path = config_path();
     std::fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| Settings::default())
+        .unwrap_or_else(Settings::default)
 }
 
 fn persist(settings: &Settings) -> Result<(), String> {
@@ -90,7 +129,11 @@ pub fn get_settings() -> Settings {
 
 #[tauri::command]
 pub fn save_settings(settings: Settings) -> Result<(), String> {
-    persist(&settings)
+    persist(&settings)?;
+    if let Ok(mut cache) = CACHE.write() {
+        *cache = Some(settings);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -107,5 +150,23 @@ mod tests {
         assert!(s.agents.forge_enabled);
         assert_eq!(s.agents.vanguard_interval_minutes, 30);
         assert!(!s.agents.light_model.is_empty());
+    }
+
+    #[test]
+    fn test_agent_workspace_canonized() {
+        let s = Settings::default();
+        assert!(std::path::Path::new(&s.agent_workspace).is_absolute());
+    }
+
+    #[test]
+    fn test_model_capabilities_default_empty() {
+        let s = Settings::default();
+        assert!(s.model_capabilities.is_empty());
+    }
+
+    #[test]
+    fn test_force_agent_mode_default_false() {
+        let s = Settings::default();
+        assert!(!s.agents.force_agent_mode);
     }
 }
