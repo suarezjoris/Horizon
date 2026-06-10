@@ -22,6 +22,7 @@ pub struct AgentSettings {
     pub light_model: String,
     /// RSS URLs for Vanguard to monitor
     pub vanguard_feeds: Vec<String>,
+    #[serde(default)]
     pub force_agent_mode: bool,
 }
 
@@ -61,7 +62,9 @@ pub struct Settings {
     pub embeddings_path: String,
     pub image_rating: String,
     pub agents: AgentSettings,
+    #[serde(default = "default_agent_workspace")]
     pub agent_workspace: String,
+    #[serde(default)]
     pub model_capabilities: HashMap<String, ModelCapability>,
 }
 
@@ -88,6 +91,12 @@ impl Default for Settings {
             model_capabilities: HashMap::new(),
         }
     }
+}
+
+fn default_agent_workspace() -> String {
+    let p = dirs::home_dir().unwrap_or_default().join("Projects/Horizon/workspace");
+    std::fs::create_dir_all(&p).ok();
+    std::fs::canonicalize(&p).unwrap_or(p).to_string_lossy().into_owned()
 }
 
 fn config_path() -> PathBuf {
