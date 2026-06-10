@@ -158,7 +158,6 @@ pub async fn run_forge(app: AppHandle, running: Arc<AtomicBool>) {
 
     emit_status(&app, "Vault Consolidator active");
 
-    // On startup: full autonomous vault health pass
     emit_status(&app, "Running vault health check…");
     crate::memory::ensure_hub_notes().await;
     let purged = crate::memory::purge_empty_vanguard_files(&vault_path);
@@ -170,6 +169,17 @@ pub async fn run_forge(app: AppHandle, running: Arc<AtomicBool>) {
             "Vault repaired: {} purged, {} orphans tagged, {} cross-linked",
             p, r, c
         )),
+    }
+
+    emit_status(&app, "Distilling Vanguard news into brain…");
+    let learned = crate::memory::distill_vanguard_to_hubs(Some(&app)).await;
+    if learned > 0 {
+        emit_status(&app, &format!("Learned {} facts from Vanguard", learned));
+    }
+
+    let refined = crate::memory::refine_messy_notes(Some(&app)).await;
+    if refined > 0 {
+        emit_status(&app, &format!("Refined {} messy notes", refined));
     }
 
     let (tx, rx) = std::sync::mpsc::channel();
@@ -193,9 +203,10 @@ pub async fn run_forge(app: AppHandle, running: Arc<AtomicBool>) {
     let mut last_event: Option<Instant> = None;
     let mut last_consolidation: Option<Instant> = None;
     let mut last_orphan_scan = Instant::now();
+    let mut last_hub_scan = Instant::now();
     let orphan_interval = Duration::from_secs(2 * 60 * 60);
+    let hub_scan_interval = Duration::from_secs(4 * 60 * 60); // every 4h regardless of file activity
     let debounce = Duration::from_secs(60);
-    // Minimum gap between full consolidation passes — prevents thrashing
     let consolidation_cooldown = Duration::from_secs(10 * 60);
 
     while running.load(Ordering::Relaxed) {
@@ -236,16 +247,25 @@ pub async fn run_forge(app: AppHandle, running: Arc<AtomicBool>) {
                 last_event = None;
                 last_consolidation = Some(Instant::now());
 
-                // Phase 1: extract insights from archive files (vanguard/, knowledge/)
-                emit_status(&app, "Extracting archive insights…");
-                crate::memory::extract_archive_insights(Some(&app)).await;
+                emit_status(&app, "Distilling Vanguard news into brain…");
+                let learned = crate::memory::distill_vanguard_to_hubs(Some(&app)).await;
+                if learned > 0 {
+                    emit_status(&app, &format!("Learned {} facts from Vanguard", learned));
+                }
 
-                // Phase 2: batch-refactor core notes
+                emit_status(&app, "Refining notes…");
+                let refined = crate::memory::refine_messy_notes(Some(&app)).await;
+                if refined > 0 {
+                    emit_status(&app, &format!("Refined {} notes", refined));
+                }
+
                 emit_status(&app, "Consolidating vault…");
                 match crate::memory::consolidate_vault_inner().await {
                     Ok(msg) => emit_status(&app, &msg),
                     Err(e) => emit_status(&app, &format!("Consolidation error: {}", e)),
                 }
+
+                crate::memory::propose_new_hubs(&app).await;
             } else if t.elapsed() >= debounce && !pending.is_empty() && !cooled_down {
                 // Drain pending without running consolidation — cooldown not expired
                 pending.clear();
@@ -259,12 +279,17 @@ pub async fn run_forge(app: AppHandle, running: Arc<AtomicBool>) {
             if !orphans.is_empty() {
                 emit_status(&app, &format!("Found {} orphan nodes — consolidating", orphans.len()));
                 last_consolidation = Some(Instant::now());
-                crate::memory::extract_archive_insights(Some(&app)).await;
+                crate::memory::distill_vanguard_to_hubs(Some(&app)).await;
                 match crate::memory::consolidate_vault_inner().await {
                     Ok(msg) => emit_status(&app, &msg),
                     Err(e) => emit_status(&app, &format!("Orphan consolidation error: {}", e)),
                 }
             }
+        }
+
+        if last_hub_scan.elapsed() >= hub_scan_interval {
+            last_hub_scan = Instant::now();
+            crate::memory::propose_new_hubs(&app).await;
         }
     }
 

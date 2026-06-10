@@ -50,6 +50,42 @@
         log(event.payload, 'info');
     });
 
+    // --- Hub proposal from Forge ---
+    let pendingProposal = null;
+    const banner = document.getElementById('hub-proposal-banner');
+
+    listen('hub-proposal', (event) => {
+        pendingProposal = event.payload;
+        document.getElementById('hub-proposal-name').textContent = `[[${pendingProposal.name}]]`;
+        document.getElementById('hub-proposal-desc').textContent = pendingProposal.description;
+        document.getElementById('hub-proposal-keywords').textContent =
+            'Keywords: ' + pendingProposal.keywords.slice(0, 8).join(', ');
+        banner.style.display = 'block';
+        log(`[FORGE] Hub proposal: ${pendingProposal.name} (${pendingProposal.uncategorized_count} uncategorized notes)`, 'info');
+    });
+
+    document.getElementById('hub-proposal-confirm')?.addEventListener('click', async () => {
+        if (!pendingProposal) return;
+        banner.style.display = 'none';
+        try {
+            const result = await invoke('confirm_hub_proposal', {
+                name: pendingProposal.name,
+                description: pendingProposal.description,
+                keywords: pendingProposal.keywords,
+            });
+            log(`[FORGE] ${result}`, 'info');
+        } catch (err) {
+            log(`[FORGE] Hub creation failed: ${err}`, 'error');
+        }
+        pendingProposal = null;
+    });
+
+    document.getElementById('hub-proposal-dismiss')?.addEventListener('click', () => {
+        banner.style.display = 'none';
+        pendingProposal = null;
+        log('[FORGE] Hub proposal dismissed', 'info');
+    });
+
     function updateAgentCard(agent, status, message) {
         const card = document.getElementById(`agent-${agent}`);
         if (!card) return;

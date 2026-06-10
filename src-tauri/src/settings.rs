@@ -28,7 +28,7 @@ impl Default for AgentSettings {
             antenna_token: "changeme".to_string(),
             antenna_port: 8374,
             vanguard_interval_minutes: 30,
-            light_model: "qwen2.5:7b".to_string(),
+            light_model: "qwen2.5-coder:14b".to_string(),
             vanguard_feeds: vec![
                 "https://news.ycombinator.com/rss".to_string(),
                 "https://feeds.feedburner.com/TheHackersNews".to_string(),

@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 use notify::{Watcher, RecursiveMode, EventKind};
 use tauri::{AppHandle, Emitter};
 
-/// Categorize a filename by extension. Returns None for unknown/unsupported types.
 pub fn categorize_file(filename: &str) -> Option<&'static str> {
     let ext = std::path::Path::new(filename)
         .extension()?

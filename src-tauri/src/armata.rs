@@ -9,7 +9,6 @@ pub enum CommandKind {
     LlmFallback,
 }
 
-/// Classify a raw command string without calling any external service.
 pub fn classify(cmd: &str) -> CommandKind {
     let lower = cmd.to_lowercase();
 

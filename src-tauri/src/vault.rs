@@ -5,8 +5,6 @@ pub fn vault_dir(vault_path: &str) -> PathBuf {
     PathBuf::from(vault_path)
 }
 
-// ── Internal functions (vault_path from trusted Rust callers) ─────────────
-
 pub fn list_vault_notes(vault_path: &str) -> Vec<String> {
     let base = vault_dir(vault_path);
     let mut notes = Vec::new();
@@ -53,7 +51,6 @@ pub fn append_note(vault_path: &str, rel_path: &str, text: &str) -> Result<(), S
     file.write_all(text.as_bytes()).map_err(|e| e.to_string())
 }
 
-/// Extract all [[wikilink]] targets from a markdown string.
 pub fn extract_wikilinks(text: &str) -> Vec<&str> {
     let mut links = Vec::new();
     let bytes = text.as_bytes();
@@ -75,9 +72,6 @@ pub fn extract_wikilinks(text: &str) -> Vec<&str> {
     links
 }
 
-// ── Path validation ────────────────────────────────────────────────────────
-
-/// Validate a relative path: no absolute paths, no `..`, .md only.
 pub(crate) fn validate_rel_path(rel_path: &str) -> Result<(), String> {
     let p = Path::new(rel_path);
     if p.is_absolute() {
@@ -93,8 +87,6 @@ pub(crate) fn validate_rel_path(rel_path: &str) -> Result<(), String> {
     }
     Ok(())
 }
-
-// ── Tauri commands (vault_path from settings, rel_path validated) ──────────
 
 #[tauri::command]
 pub fn list_notes() -> Vec<String> {

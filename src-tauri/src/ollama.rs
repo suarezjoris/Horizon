@@ -90,7 +90,6 @@ pub async fn chat_stream(
     Ok(full)
 }
 
-/// Get embeddings for a list of texts.
 pub async fn embed(texts: Vec<String>, model: &str) -> Result<Vec<Vec<f32>>, String> {
     let resp: EmbedResponse = HTTP_CLIENT
         .post("http://localhost:11434/api/embed")
@@ -104,7 +103,6 @@ pub async fn embed(texts: Vec<String>, model: &str) -> Result<Vec<Vec<f32>>, Str
     Ok(resp.embeddings)
 }
 
-/// Non-streaming chat, returns the full response content.
 pub async fn chat_once(
     messages: Vec<serde_json::Value>,
     model: &str,

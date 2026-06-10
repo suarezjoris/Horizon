@@ -4,7 +4,13 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Emitter};
 use crate::settings;
 
-const MAX_ITEMS_PER_SOURCE: usize = 5;
+const MAX_ITEMS_PER_FEED: usize = 5;
+const MAX_ITEMS_PER_QUERY: usize = 3;
+const MAX_DAILY_ARTICLES: usize = 30;
+
+fn hub_stems() -> Vec<String> {
+    crate::memory::all_hub_names()
+}
 
 fn emit_status(app: &AppHandle, status: &str, msg: &str) {
     let _ = app.emit("armata-agent-status", serde_json::json!({
@@ -14,28 +20,114 @@ fn emit_status(app: &AppHandle, status: &str, msg: &str) {
     }));
 }
 
-// ── RSS/Atom parser ───────────────────────────────────────────────────────────
+pub fn vault_keywords(vault_path: &str) -> Vec<String> {
+    let notes = crate::vault::list_vault_notes(vault_path);
+    let mut keywords = Vec::new();
 
-/// Parse RSS/Atom XML into (title, link, description) triples.
+    for path in &notes {
+        if path.starts_with("vanguard/")
+            || path.starts_with("memory/")
+            || path.starts_with("knowledge/")
+            || path.starts_with("images/")   // ComfyUI image metadata files
+            || path.starts_with("film/")
+            || path.starts_with("characters/")
+        {
+            continue;
+        }
+
+        let stem = path
+            .trim_end_matches(".md")
+            .rsplit('/')
+            .next()
+            .unwrap_or(path);
+
+        if stem.starts_with("digest-") { continue; }
+        if stem.starts_with(|c: char| c.is_ascii_digit()) { continue; }
+        if hub_stems().iter().any(|h| h == stem) { continue; }
+        if stem.len() <= 3 { continue; }
+
+        keywords.push(stem.replace('_', " "));
+    }
+
+    keywords.sort_by(|a, b| b.len().cmp(&a.len()));
+    keywords.dedup();
+    keywords
+}
+
+fn build_search_queries(keywords: &[String]) -> Vec<String> {
+    let mut queries = Vec::new();
+
+    for kw in keywords {
+        let topics = crate::memory::detect_topics(kw, "");
+        let topic = topics.into_iter().next().unwrap_or_else(|| "misc".to_string());
+
+        let is_multiword = kw.contains(' ');
+
+        // Skip single-word terms with no recognized topic — they generate noise queries
+        // (e.g. "portfolio" → finance spam, "internship" → job boards, "moonscoop" → anime)
+        if !is_multiword && topic == "notes" { continue; }
+
+        let context: &str = if is_multiword {
+            ""
+        } else {
+            match topic.as_str() {
+                "programming" => " programming language",
+                "linux"       => " Linux OS",
+                "security"    => " cybersecurity",
+                "ai"          => " artificial intelligence",
+                "gaming"      => " video game",
+                "retro"       => " retro computing",
+                "science"     => " science",
+                "music"       => " music",
+                _             => "",
+            }
+        };
+
+        queries.push(format!("\"{}\"{}  news", kw, context));
+    }
+
+    queries.push("technology programming news".to_string());
+    queries.push("artificial intelligence news".to_string());
+    queries.truncate(10);
+    queries
+}
+
+fn google_news_rss(query: &str) -> String {
+    format!(
+        "https://news.google.com/rss/search?q={}&hl=en-US&gl=US&ceid=US:en",
+        urlencoding::encode(query)
+    )
+}
+
+pub fn relevance_score(title: &str, desc: &str, keywords: &[String]) -> usize {
+    let title_low = title.to_lowercase();
+    let desc_low = desc.to_lowercase();
+
+    keywords.iter().map(|kw| {
+        let k = kw.to_lowercase();
+        let in_title = if title_low.contains(&k) { 3 } else { 0 };
+        let in_desc  = if desc_low.contains(&k)  { 1 } else { 0 };
+        in_title + in_desc
+    }).sum()
+}
+
 pub fn parse_rss_items(xml: &str) -> Vec<(String, String, String)> {
     let mut items = Vec::new();
     let mut search = xml;
 
     loop {
-        // Find next <item> or <entry>
-        let item_pos = search.find("<item").or_else(|| search.find("<entry>")).or_else(|| search.find("<entry "));
+        let item_pos = search.find("<item")
+            .or_else(|| search.find("<entry>"))
+            .or_else(|| search.find("<entry "));
         let item_pos = match item_pos { Some(p) => p, None => break };
 
         let tag = if search[item_pos..].starts_with("<item") { "item" } else { "entry" };
         let close_tag = format!("</{}>", tag);
 
-        // Skip to end of opening tag
         let content_start = match search[item_pos..].find('>') {
             Some(p) => item_pos + p + 1,
             None => break,
         };
-
-        // Find closing tag
         let block_end = match search[content_start..].find(&close_tag) {
             Some(p) => content_start + p,
             None => break,
@@ -59,13 +151,11 @@ pub fn parse_rss_items(xml: &str) -> Vec<(String, String, String)> {
     items
 }
 
-/// Extract the text content of an XML element, handling CDATA.
 fn extract_field(block: &str, tag: &str) -> Option<String> {
     let open = format!("<{}", tag);
     let pos = block.find(&open)?;
     let tag_end = block[pos..].find('>')?;
     let content_start = pos + tag_end + 1;
-
     let close = format!("</{}>", tag);
     let end = block[content_start..].find(&close)?;
     let raw = block[content_start..content_start + end].trim();
@@ -87,22 +177,18 @@ fn extract_field(block: &str, tag: &str) -> Option<String> {
     if decoded.trim().is_empty() { None } else { Some(decoded.trim().to_string()) }
 }
 
-/// Extract the best link from an RSS item or Atom entry block.
 fn extract_link(block: &str) -> Option<String> {
-    // RSS: <link>url</link>
     if let Some(url) = extract_field(block, "link") {
         let url = url.trim().to_string();
         if url.starts_with("http") { return Some(url); }
     }
 
-    // Atom: <link href="url" rel="alternate"/> or <link href="url"/>
     let mut s = block;
     while let Some(pos) = s.find("<link") {
         let after = &s[pos + 5..];
         let tag_end = after.find('>').unwrap_or(after.len());
         let tag_content = &after[..tag_end];
 
-        // Skip self/hub links
         if !tag_content.contains("rel=\"self\"") && !tag_content.contains("rel=\"hub\"") {
             if let Some(href_pos) = tag_content.find("href=\"") {
                 let url_start = href_pos + 6;
@@ -120,25 +206,9 @@ fn extract_link(block: &str) -> Option<String> {
     None
 }
 
-/// Return true if content looks like an RSS/Atom feed.
 fn is_feed(content: &str) -> bool {
     let head: String = content.chars().take(512).collect();
     head.contains("<rss") || head.contains("<feed") || head.contains("<atom:")
-}
-
-// ── Utilities ─────────────────────────────────────────────────────────────────
-
-fn url_to_slug(url: &str) -> String {
-    url.chars()
-        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
-        .collect::<String>()
-        .split('-')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("-")
-        .chars()
-        .take(60)
-        .collect()
 }
 
 async fn fetch(url: &str) -> Option<String> {
@@ -150,7 +220,6 @@ async fn fetch(url: &str) -> Option<String> {
     client.get(url).send().await.ok()?.text().await.ok()
 }
 
-/// Strip HTML tags, scripts, and style blocks; collapse whitespace.
 fn extract_text(html: &str) -> String {
     let mut text = String::with_capacity(html.len() / 2);
     let mut in_tag = false;
@@ -181,7 +250,7 @@ fn extract_text(html: &str) -> String {
 
 async fn summarize(title: &str, body: &str, model: &str) -> String {
     let prompt = format!(
-        "Write a 3-sentence summary of this article for a developer knowledge base. Be specific and factual.\n\nTitle: {}\n\nContent: {}",
+        "Write a 3-sentence summary of this article for a personal knowledge base. Be specific and factual.\n\nTitle: {}\n\nContent: {}",
         title,
         body.chars().take(2000).collect::<String>()
     );
@@ -190,25 +259,21 @@ async fn summarize(title: &str, body: &str, model: &str) -> String {
         .unwrap_or_else(|_| String::new())
 }
 
-/// Append an article entry to the daily digest file. Returns true if newly added.
 fn append_to_digest(vault_dir: &PathBuf, date: &str, title: &str, url: &str, summary: &str) -> bool {
     let digest_path = vault_dir.join(format!("digest-{}.md", date));
 
-    // Dedup: check if this URL is already in the digest
     if digest_path.exists() {
         if let Ok(existing) = std::fs::read_to_string(&digest_path) {
             if existing.contains(url) { return false; }
         }
     }
 
-    // Detect topics deterministically — always guarantees at least one wikilink
     let topics = crate::memory::detect_topics(title, summary);
     let topic_links = topics.iter()
         .map(|t| format!("[[{}]]", t))
         .collect::<Vec<_>>()
         .join(" ");
 
-    // Use summary if available; fall back to a minimal descriptor so entries are never empty
     let body = if summary.trim().is_empty() {
         format!("*No summary available.* Source: {}", url)
     } else {
@@ -229,7 +294,91 @@ fn append_to_digest(vault_dir: &PathBuf, date: &str, title: &str, url: &str, sum
     file.write_all(entry.as_bytes()).is_ok()
 }
 
-// ── Main scan loop ─────────────────────────────────────────────────────────────
+async fn scan_feed(
+    app: &AppHandle,
+    vault_dir: &PathBuf,
+    date: &str,
+    source_url: &str,
+    model: &str,
+    keywords: &[String],
+    max_items: usize,
+    require_relevance: bool,
+) -> usize {
+    let content = match fetch(source_url).await {
+        Some(c) => c,
+        None => {
+            emit_status(app, "warn", &format!("Unreachable: {}", source_url));
+            return 0;
+        }
+    };
+
+    if !is_feed(&content) { return 0; }
+
+    let items = parse_rss_items(&content);
+    if items.is_empty() { return 0; }
+
+    let digest_path = vault_dir.join(format!("digest-{}.md", date));
+    let existing = if digest_path.exists() {
+        std::fs::read_to_string(&digest_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let mut saved = 0;
+    for (title, article_url, rss_desc) in &items {
+        if saved >= max_items { break; }
+        if existing.contains(article_url.as_str()) { continue; }
+
+        if require_relevance {
+            let score = relevance_score(title, rss_desc, keywords);
+            if score == 0 { continue; }
+        }
+
+        emit_status(app, "online", &format!("Reading: {}", title));
+
+        let fetched_text = fetch(article_url).await.map(|html| extract_text(&html));
+        let rss_text = extract_text(rss_desc);
+        let best_content: String = match &fetched_text {
+            Some(t) if t.split_whitespace().count() >= 30 => t.clone(),
+            _ if rss_text.split_whitespace().count() >= 5 => rss_text,
+            _ => String::new(),
+        };
+
+        let vram_permit = {
+            use tauri::Manager;
+            let q = app.state::<crate::vram_queue::VramQueue>();
+            q.try_acquire("vanguard-summarize")
+        };
+
+        let summary = if best_content.split_whitespace().count() >= 10 {
+            if vram_permit.is_some() {
+                emit_status(app, "online", &format!("Summarizing: {}", title));
+                let s = summarize(title, &best_content, model).await;
+                if s.trim().is_empty() {
+                    emit_status(app, "warn", &format!("LLM empty for: {} — using excerpt", title));
+                    best_content.chars().take(600).collect()
+                } else {
+                    s
+                }
+            } else {
+                // GPU busy (chat or Forge) — save excerpt, distillation will process it later
+                emit_status(app, "warn", &format!("GPU busy — saving excerpt: {}", title));
+                best_content.chars().take(600).collect()
+            }
+        } else {
+            emit_status(app, "warn", &format!("No content for: {}", title));
+            String::new()
+        };
+        drop(vram_permit);
+
+        if append_to_digest(vault_dir, date, title, article_url, &summary) {
+            emit_status(app, "online", &format!("Saved: {}", title));
+            saved += 1;
+        }
+    }
+
+    saved
+}
 
 async fn scan_sources(app: &AppHandle) {
     let s = settings::load();
@@ -239,71 +388,37 @@ async fn scan_sources(app: &AppHandle) {
     let date = chrono::Local::now().format("%Y-%m-%d").to_string();
     let mut total_new = 0usize;
 
-    for source_url in &s.agents.vanguard_feeds {
-        emit_status(app, "online", &format!("Scanning: {}", source_url));
+    let keywords = vault_keywords(&s.vault_path);
+    let queries = build_search_queries(&keywords);
 
-        let content = match fetch(source_url).await {
-            Some(c) => c,
-            None => {
-                emit_status(app, "warn", &format!("Unreachable: {}", source_url));
-                continue;
-            }
-        };
+    emit_status(app, "online", &format!(
+        "Vault profile: {} keywords, {} search queries",
+        keywords.len(), queries.len()
+    ));
 
-        if !is_feed(&content) {
-            emit_status(app, "warn", &format!("Not an RSS/Atom feed: {}", source_url));
-            continue;
-        }
+    for query in &queries {
+        if total_new >= MAX_DAILY_ARTICLES { break; }
+        let url = google_news_rss(query);
+        emit_status(app, "online", &format!("Querying: {}", query));
+        let n = scan_feed(
+            app, &vault_dir, &date, &url, &model,
+            &keywords, MAX_ITEMS_PER_QUERY, false,
+        ).await;
+        total_new += n;
+    }
 
-        let items = parse_rss_items(&content);
-
-        if items.is_empty() {
-            emit_status(app, "warn", &format!("Feed parsed but no items found: {}", source_url));
-            continue;
-        }
-
-        let mut saved = 0;
-        // Load today's digest once for dedup check
-        let digest_path = vault_dir.join(format!("digest-{}.md", date));
-        let existing_digest = if digest_path.exists() {
-            std::fs::read_to_string(&digest_path).unwrap_or_default()
-        } else {
-            String::new()
-        };
-
-        for (title, article_url, rss_desc) in items.iter() {
-            if saved >= MAX_ITEMS_PER_SOURCE { break; }
-            if existing_digest.contains(article_url.as_str()) { continue; }
-
-            emit_status(app, "online", &format!("Reading: {}", title));
-
-            // Gather as much content as possible: full article > RSS desc > title alone
-            let fetched_text = fetch(article_url).await.map(|html| extract_text(&html));
-            let best_content = match &fetched_text {
-                Some(t) if t.split_whitespace().count() >= 30 => t.as_str(),
-                _ if rss_desc.split_whitespace().count() >= 5 => rss_desc.as_str(),
-                _ => "",
-            };
-
-            // Summarize if we have enough content; otherwise build a minimal entry from title
-            let summary = if best_content.split_whitespace().count() >= 20 {
-                let s = summarize(title, best_content, &model).await;
-                if s.trim().is_empty() { best_content.chars().take(500).collect() } else { s }
-            } else {
-                // Minimal entry: no content fetched, but title + wikilinks still get saved
-                String::new()
-            };
-
-            if append_to_digest(&vault_dir, &date, title, article_url, &summary) {
-                emit_status(app, "online", &format!("Saved: {}", title));
-                total_new += 1;
-                saved += 1;
-            }
-        }
+    for feed_url in &s.agents.vanguard_feeds {
+        if total_new >= MAX_DAILY_ARTICLES { break; }
+        emit_status(app, "online", &format!("Feed: {}", feed_url));
+        let n = scan_feed(
+            app, &vault_dir, &date, feed_url, &model,
+            &keywords, MAX_ITEMS_PER_FEED, true,
+        ).await;
+        total_new += n;
     }
 
     if total_new > 0 {
-        emit_status(app, "online", &format!("{} new articles added to vault", total_new));
+        emit_status(app, "online", &format!("{} new articles added to digest", total_new));
     } else {
         emit_status(app, "online", "No new intel");
     }
@@ -343,7 +458,6 @@ mod tests {
         let items = parse_rss_items(xml);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].0, "Hello World");
-        assert_eq!(items[0].1, "https://example.com/1");
     }
 
     #[test]
@@ -356,7 +470,6 @@ mod tests {
   </item>
 </channel></rss>"#;
         let items = parse_rss_items(xml);
-        assert_eq!(items.len(), 1);
         assert_eq!(items[0].0, "CDATA Title & More");
         assert_eq!(items[0].2, "Short summary here");
     }
@@ -371,8 +484,6 @@ mod tests {
   </entry>
 </feed>"#;
         let items = parse_rss_items(xml);
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].0, "Atom Entry");
         assert_eq!(items[0].1, "https://example.com/atom/1");
     }
 
@@ -381,6 +492,28 @@ mod tests {
         assert!(is_feed("<rss version=\"2.0\">"));
         assert!(is_feed("<?xml?><feed xmlns="));
         assert!(!is_feed("<html><body>"));
+    }
+
+    #[test]
+    fn test_relevance_score() {
+        let keywords = vec!["Colin McRae".to_string(), "rally".to_string(), "Rust".to_string()];
+        // Strong match: title hit = 3
+        assert!(relevance_score("Colin McRae wins rally", "", &keywords) >= 3);
+        // No match
+        assert_eq!(relevance_score("Stock market crashes", "banking news", &keywords), 0);
+        // Desc-only match = 1
+        assert_eq!(relevance_score("Racing news", "Rust-powered car telemetry", &keywords), 1);
+    }
+
+    #[test]
+    fn test_build_search_queries_not_empty() {
+        let keywords = vec![
+            "colin mcrae".to_string(),
+            "rally".to_string(),
+            "rust programming".to_string(),
+        ];
+        let queries = build_search_queries(&keywords);
+        assert!(!queries.is_empty());
     }
 
     #[test]

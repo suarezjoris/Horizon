@@ -3,15 +3,12 @@ use std::collections::HashSet;
 use tauri::{AppHandle, Emitter};
 use crate::settings;
 
-/// Normalize a name/slug to lowercase with underscores for matching.
 fn normalize_slug(s: &str) -> String {
     s.to_lowercase()
         .replace(' ', "_")
         .replace('-', "_")
 }
 
-/// Convert a lowercase slug to a Wikipedia title (capitalize each word).
-/// "colin_mcrae" → "Colin_McRae" (API handles redirects for minor case mismatches)
 fn to_wiki_title(slug: &str) -> String {
     slug.split('_')
         .map(|word| {
@@ -26,8 +23,6 @@ fn to_wiki_title(slug: &str) -> String {
 }
 
 
-/// Fetch a Wikipedia article summary via the REST API.
-/// Returns (title, extract) or None if not found.
 async fn fetch_wiki_summary(client: &reqwest::Client, slug: &str) -> Option<(String, String)> {
     let title = to_wiki_title(slug);
     let url = format!(

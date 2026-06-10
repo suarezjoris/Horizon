@@ -183,6 +183,23 @@ async function send() {
       return;
     }
 
+    if (cmd === 'save' || cmd === 'remember') {
+      if (!query) { addBubble('ai', 'Usage: /save <note_name>  — saves the last AI response to that vault note.'); return; }
+      // Find last AI bubble content to save
+      const bubbles = document.querySelectorAll('.bubble.ai');
+      const lastAI = bubbles[bubbles.length - 1];
+      const content = lastAI ? lastAI.textContent.trim() : '';
+      if (!content) { addBubble('ai', 'Nothing to save — no AI response found.'); return; }
+      const bubble = addBubble('ai', `Saving to ${query}.md…`);
+      try {
+        const msg = await invoke('save_to_note', { noteHint: query, content });
+        bubble.textContent = msg;
+      } catch (err) {
+        bubble.textContent = `Save failed: ${err}`;
+      }
+      return;
+    }
+
     if (cmd === 'consolidate') {
       const bubble = addBubble('ai', 'Consolidating neurons... refactoring the Second Brain.');
       try {
@@ -238,6 +255,36 @@ async function send() {
         }
       } catch (err) {
         addBubble('ai', `Search failed: ${err}`);
+      }
+      return;
+    }
+
+    if (cmd === 'topics') {
+      const bubble = addBubble('ai', 'Analyzing vault topics…');
+      try {
+        const status = await invoke('vault_topic_status');
+        const hubLines = status.hubs.map(h => `- [[${h.name}]] — ${h.count} note(s)`).join('\n');
+        const uncatList = status.uncategorized.length
+          ? status.uncategorized.slice(0, 10).join(', ') + (status.uncategorized.length > 10 ? ` (+${status.uncategorized.length - 10} more)` : '')
+          : 'none';
+        bubble.innerHTML = DOMPurify.sanitize(marked.parse(
+          `## Vault Topic Health\n\n**Active hubs** (${status.hubs.length}):\n${hubLines}\n\n` +
+          `**Uncategorized notes** (${status.uncategorized_count}): ${uncatList}\n\n` +
+          `*Use \`/analyze-topics\` to have Forge propose a new hub.*`
+        ));
+      } catch (err) {
+        bubble.textContent = `Failed: ${err}`;
+      }
+      return;
+    }
+
+    if (cmd === 'analyze-topics') {
+      const bubble = addBubble('ai', 'Forge is analyzing uncategorized notes…');
+      try {
+        const msg = await invoke('trigger_hub_proposal');
+        bubble.textContent = msg;
+      } catch (err) {
+        bubble.textContent = `Failed: ${err}`;
       }
       return;
     }

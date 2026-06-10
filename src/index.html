@@ -82,6 +82,18 @@
   </div>
 </div>
 
+<!-- Hub Proposal Banner (shown by Forge when a new topic cluster is detected) -->
+<div id="hub-proposal-banner" style="display:none; position:fixed; bottom:80px; right:20px; z-index:9999; background:var(--bg-card,#1e1e2e); border:1px solid var(--accent-gold,#d4af37); border-radius:14px; padding:16px 20px; max-width:340px; box-shadow:0 8px 32px rgba(0,0,0,0.5);">
+  <div style="font-size:12px; color:var(--accent-gold,#d4af37); font-weight:700; margin-bottom:6px;">🗂️ FORGE DETECTED NEW TOPIC</div>
+  <div id="hub-proposal-name" style="font-size:16px; font-weight:800; color:#fff; margin-bottom:4px;"></div>
+  <div id="hub-proposal-desc" style="font-size:12px; color:rgba(255,255,255,0.6); margin-bottom:8px;"></div>
+  <div id="hub-proposal-keywords" style="font-size:11px; color:rgba(255,255,255,0.4); margin-bottom:12px;"></div>
+  <div style="display:flex; gap:8px;">
+    <button id="hub-proposal-confirm" style="flex:1; background:var(--accent-gold,#d4af37); color:#000; border:none; padding:8px; border-radius:8px; font-weight:800; cursor:pointer;">Create Hub</button>
+    <button id="hub-proposal-dismiss" style="flex:1; background:rgba(255,255,255,0.08); color:#fff; border:none; padding:8px; border-radius:8px; cursor:pointer;">Dismiss</button>
+  </div>
+</div>
+
 <div id="panels">
   <!-- LLM Panel -->
   <div class="panel active" id="panel-llm">
@@ -350,6 +362,7 @@
       <li><strong style="color: var(--accent-gold);">/search &lt;query&gt;</strong> : Manually search the Second Brain vault.</li>
       <li><strong style="color: var(--accent-gold);">/reindex</strong> : Rebuild the RAG vector index (ChromaDB).</li>
       <li><strong style="color: var(--accent-gold);">/wiki</strong> : Fetch Wikipedia articles for your vault notes and save them as cross-linked knowledge files.</li>
+      <li><strong style="color: var(--accent-gold);">/save &lt;note&gt;</strong> : Save the last AI response directly to a vault note (e.g. /save music).</li>
       <li><strong style="color: var(--accent-gold);">/consolidate</strong> : Ask the AI to refactor and link your Second Brain notes.</li>
       <li><strong style="color: var(--accent-gold);">/file &lt;path&gt;</strong> : Load any file (Code, PDF, Docx, Pptx, Xlsx) into context.</li>
       <li><strong style="color: var(--accent-gold);">/paste</strong> : Paste an image from the clipboard (or press F2).</li>
