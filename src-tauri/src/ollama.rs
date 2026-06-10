@@ -155,6 +155,64 @@ struct Model {
     name: String,
 }
 
+#[derive(Serialize, Clone)]
+pub struct Tool {
+    pub r#type: String,
+    pub function: ToolFunction,
+}
+
+#[derive(Serialize, Clone)]
+pub struct ToolFunction {
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct ToolCall {
+    pub function: ToolCallFunction,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct ToolCallFunction {
+    pub name: String,
+    pub arguments: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+pub struct AgentMessage {
+    pub content: Option<String>,
+    pub tool_calls: Option<Vec<ToolCall>>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AgentChatResponse {
+    pub message: AgentMessage,
+}
+
+pub async fn chat_with_tools(
+    messages: Vec<serde_json::Value>,
+    tools: &[Tool],
+    model: &str,
+) -> Result<AgentMessage, String> {
+    let resp = HTTP_CLIENT
+        .post("http://localhost:11434/api/chat")
+        .json(&serde_json::json!({
+            "model": model,
+            "messages": messages,
+            "tools": tools,
+            "stream": false,
+            "keep_alive": "2m",
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Ollama unreachable: {e}"))?
+        .json::<AgentChatResponse>()
+        .await
+        .map_err(|e| format!("Ollama parse error: {e}"))?;
+    Ok(resp.message)
+}
+
 pub async fn list_models() -> Result<Vec<String>, String> {
     let resp: ModelList = HTTP_CLIENT
         .get("http://localhost:11434/api/tags")
@@ -176,4 +234,38 @@ pub async fn unload(model: &str) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_agent_message_deserialize_tool_calls() {
+        let json = r#"{
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    { "function": { "name": "search_web", "arguments": { "query": "rust async" } } }
+                ]
+            },
+            "done": true
+        }"#;
+        let resp: AgentChatResponse = serde_json::from_str(json).unwrap();
+        let calls = resp.message.tool_calls.unwrap();
+        assert_eq!(calls[0].function.name, "search_web");
+        assert_eq!(calls[0].function.arguments["query"], "rust async");
+    }
+
+    #[test]
+    fn test_agent_message_deserialize_text() {
+        let json = r#"{
+            "message": { "role": "assistant", "content": "Hello world", "tool_calls": null },
+            "done": true
+        }"#;
+        let resp: AgentChatResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.message.tool_calls.is_none());
+        assert_eq!(resp.message.content.unwrap(), "Hello world");
+    }
 }
