@@ -120,9 +120,12 @@ fi
 mkdir -p "$MODELS_DIR"
 if [ ! -f "$MODELS_DIR/ponyDiffusionV6XL_v6.safetensors" ]; then
     echo "📥 Downloading Pony Diffusion V6 XL (6.5 GB)..."
-    wget -q --show-progress \
+    wget --show-progress \
         -O "$MODELS_DIR/ponyDiffusionV6XL_v6.safetensors" \
-        "https://huggingface.co/LyliaEngine/Pony_Diffusion_V6_XL/resolve/main/ponyDiffusionV6XL_v6StartWithThis.safetensors"
+        "https://huggingface.co/LyliaEngine/Pony_Diffusion_V6_XL/resolve/main/ponyDiffusionV6XL_v6StartWithThis.safetensors" \
+        || { rm -f "$MODELS_DIR/ponyDiffusionV6XL_v6.safetensors"; \
+             echo "⚠️  Model download failed. Download manually to:"; \
+             echo "   $MODELS_DIR/ponyDiffusionV6XL_v6.safetensors"; }
 fi
 cd "$PROJECT_ROOT"
 
