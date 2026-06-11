@@ -36,11 +36,13 @@ pub fn spawn_comfyui() -> Result<(), String> {
         .map_err(|_| format!("Invalid ComfyUI path: {}", s.comfyui_path))?;
 
     let home = dirs::home_dir().ok_or("Could not find home directory")?;
-    let allowed_root = home.join("Projects");
 
-    // Must be inside ~/Projects and must be a main.py file
-    if !path.starts_with(&allowed_root) || path.file_name() != Some(std::ffi::OsStr::new("main.py")) {
-        return Err("Security Error: ComfyUI path must be a 'main.py' file inside your Projects directory.".into());
+    // Must be inside home dir and must be a main.py file inside a ComfyUI directory
+    if !path.starts_with(&home)
+        || path.file_name() != Some(std::ffi::OsStr::new("main.py"))
+        || !path.to_string_lossy().contains("ComfyUI")
+    {
+        return Err("Security Error: ComfyUI path must be a main.py inside a ComfyUI directory under your home.".into());
     }
 
     let parent = path.parent().ok_or("Invalid ComfyUI parent directory")?;
@@ -314,9 +316,11 @@ pub async fn generate_image(
 
         let bytes = img_resp.bytes().await.map_err(|e| e.to_string())?;
 
-        let comfyui_output = dirs::home_dir()
-            .unwrap_or_default()
-            .join("Projects/Horizon/ComfyUI/output");
+        let s = settings::load();
+        let comfyui_output = std::path::PathBuf::from(&s.comfyui_path)
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join("output");
         let sub = if subfolder.is_empty() { comfyui_output.clone() } else { comfyui_output.join(&subfolder) };
         let comfyui_path = sub.join(&filename).to_string_lossy().into_owned();
 

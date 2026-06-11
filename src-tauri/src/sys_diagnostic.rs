@@ -246,9 +246,9 @@ pub async fn fix_health_issue(name: String) -> Result<String, String> {
                     crate::settings::save_settings(settings)?;
                     
                     // Force spawn ComfyUI now that path is correct
-                    let _ = crate::comfyui::spawn_comfyui();
-                    
-                    Ok(format!("ComfyUI found, reconnected and STARTED at {}", path.display()))
+                    crate::comfyui::spawn_comfyui()?;
+
+                    Ok(format!("ComfyUI found and started at {}", path.display()))
                 }
                 None => Err("Could not find ComfyUI automatically. Please set path manually in settings.".into()),
             }
