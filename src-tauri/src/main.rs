@@ -115,9 +115,6 @@ async fn chat(
         system_base, context
     );
 
-    let mut current_messages = vec![serde_json::json!({"role": "system", "content": system.clone()})];
-    current_messages.extend(messages.clone());
-
     const MAX_TOOL_CALLS: usize = 10;
 
     let use_tools = s.agents.force_agent_mode
@@ -125,6 +122,26 @@ async fn chat(
             .get(&active_model)
             .map(|c| c.tool_calling)
             .unwrap_or(false);
+
+    // Build messages with appropriate system prompt
+    let agent_system = if use_tools {
+        format!(
+            "{}\n\nYou are an autonomous agent. Use the provided tools to complete tasks.\n\
+            RULES:\n\
+            1. LANGUAGE: Always respond in the SAME LANGUAGE as the user's request.\n\
+            2. ACCURACY: Do not speculate or fabricate facts.\n\
+            3. Use search_web for any question about current events, prices, or real-time data.\n\
+            4. Use generate_image to create images when asked.\n\
+            5. When done with all tool calls, write a clear natural-language summary.\n\n\
+            Local Memory Context:\n---\n{}\n---",
+            system_base, context
+        )
+    } else {
+        system.clone()
+    };
+
+    let mut current_messages = vec![serde_json::json!({"role": "system", "content": agent_system})];
+    current_messages.extend(messages.clone());
 
     if use_tools {
         // === BOUCLE AGENTIQUE V4 ===
