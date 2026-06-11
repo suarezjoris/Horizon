@@ -12,7 +12,7 @@ echo "🚀 Starting Horizon Installation..."
 # ── 1. Detect distro ──────────────────────────────────────────────────────────
 echo "📦 Installing system dependencies..."
 if command -v pacman &>/dev/null; then
-    sudo pacman -S --needed --noconfirm \
+    sudo pacman -Sy --needed --noconfirm \
         webkit2gtk-4.1 base-devel curl wget git bubblewrap \
         openblas nspr nss at-spi2-core libdrm mesa \
         libxcomposite libxdamage libxfixes libxrandr alsa-lib pango cairo \
@@ -68,8 +68,11 @@ if [ ! -d "$PROJECT_ROOT/.venv" ]; then
     ~/.local/bin/uv venv --python 3.12 "$PROJECT_ROOT/.venv" 2>/dev/null \
         || python3 -m venv "$PROJECT_ROOT/.venv"
 fi
-"$PROJECT_ROOT/.venv/bin/pip" install -q --upgrade \
-    ddgs readability-lxml requests
+~/.local/bin/uv pip install -q --upgrade \
+    --python "$PROJECT_ROOT/.venv/bin/python3" \
+    ddgs readability-lxml requests 2>/dev/null \
+    || "$PROJECT_ROOT/.venv/bin/python3" -m pip install -q --upgrade \
+        ddgs readability-lxml requests
 
 # ── 6. Ollama & Models ────────────────────────────────────────────────────────
 echo "🧠 Setting up Ollama..."
