@@ -27,9 +27,14 @@ fi
 # ── 2. Search venv deps ───────────────────────────────────────────────────────
 if [ ! -d "$PROJECT_ROOT/.venv" ]; then
     echo "🐍 Creating search venv..."
-    python3 -m venv "$PROJECT_ROOT/.venv"
+    ~/.local/bin/uv venv --python 3.12 "$PROJECT_ROOT/.venv" 2>/dev/null \
+        || python3 -m venv "$PROJECT_ROOT/.venv"
 fi
-"$PROJECT_ROOT/.venv/bin/pip" install -q --upgrade ddgs readability-lxml requests
+~/.local/bin/uv pip install -q --upgrade \
+    --python "$PROJECT_ROOT/.venv/bin/python3" \
+    ddgs readability-lxml requests 2>/dev/null \
+    || "$PROJECT_ROOT/.venv/bin/python3" -m pip install -q --upgrade \
+        ddgs readability-lxml requests
 
 # ── 3. ComfyUI deps (only if venv exists) ────────────────────────────────────
 if [ -d "$PROJECT_ROOT/ComfyUI/venv" ]; then
