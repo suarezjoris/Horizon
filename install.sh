@@ -90,6 +90,13 @@ if [ ! -d "$PROJECT_ROOT/ComfyUI" ]; then
     git clone https://github.com/comfyanonymous/ComfyUI.git "$PROJECT_ROOT/ComfyUI"
 fi
 
+# Verify clone completed (requirements.txt must exist)
+if [ ! -f "$PROJECT_ROOT/ComfyUI/requirements.txt" ]; then
+    echo "❌ ComfyUI clone seems incomplete (requirements.txt missing). Re-cloning..."
+    rm -rf "$PROJECT_ROOT/ComfyUI"
+    git clone https://github.com/comfyanonymous/ComfyUI.git "$PROJECT_ROOT/ComfyUI"
+fi
+
 cd "$PROJECT_ROOT/ComfyUI"
 if [ ! -d "venv" ]; then
     echo "🐍 Creating ComfyUI venv (Python 3.12)..."
