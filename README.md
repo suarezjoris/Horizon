@@ -1,13 +1,13 @@
 <div align="center">
   
-# 🌅 Horizon
+# 🌅 Horizon V4
 
-**Your Premium, Uncensored Personal AI Assistant.**
+**The Ultimate Agentic, Uncensored Personal AI Ecosystem.**
 <br>
-*Built with Rust, Tauri v2, Vanilla JS, Ollama, and ComfyUI.*
+*Native Rust (Tauri v2), Vanilla JS, Ollama, and ComfyUI.*
 
-[![Version](https://img.shields.io/badge/version-v2.1.0-d4af37.svg)](https://github.com/suarezjoris/Horizon/releases)
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-00f2ff.svg)]()
+[![Version](https://img.shields.io/badge/version-v4.0.0-d4af37.svg)](https://github.com/suarezjoris/Horizon/releases)
+[![Platform](https://img.shields.io/badge/platform-Linux-00f2ff.svg)]()
 [![Rust](https://img.shields.io/badge/rust-backend-orange.svg)]()
 
 </div>
@@ -16,31 +16,38 @@
 
 ## 🔮 Overview
 
-Horizon is a private, locally-hosted AI ecosystem designed to be the ultimate digital companion. Moving away from cloud-dependent services, Horizon runs entirely on your hardware, ensuring absolute privacy and uncensored interactions. 
+Horizon V4 is a major evolution from a "Chat Assistant" to a fully **Agentic Ecosystem**. It is a private, locally-hosted digital companion that doesn't just talk—it **acts**. Built with a focus on absolute privacy, uncensored intelligence, and high-performance local RAG.
 
-Wrapped in a custom **Hextech / Arcane** aesthetic (Dark Glassmorphism, Cinzel typography, and Clockwork motion), Horizon integrates advanced text generation, image creation, video generation, roleplaying, and knowledge management into a single, seamless native desktop application.
+Wrapped in its signature **Hextech / Arcane** aesthetic, V4 introduces a native tool-calling loop, autonomous background daemons, and a tactical command center.
 
-## ✨ Core Features
+## ✨ What's New in V4
 
-- **💬 Intelligent LLM Chat**: Powered by `qwen2.5-coder:14b` (via Ollama). Horizon can reason, code, and chat fluidly.
-- **🌐 Autonomous Web Search**: If Horizon doesn't know a fact, it automatically triggers a Python-based DuckDuckGo search to verify information before answering.
-- **🖼️ Image Generation**: Deep integration with **ComfyUI**. Generate stunning images using SDXL/Pony models directly from the chat or the dedicated Image tab.
-- **🎬 Cinema (Video Generation)**: Text-to-video and image-to-video via **ComfyUI + Wan 2.2** (WanVideoWrapper). Renders animated clips with a "Past Renders" gallery and plays them in your system player. *Linux + CUDA GPU; block-swap lets the 14B model run on 12 GB VRAM (image-to-video gives the best results).*
-- **🎭 Character Roleplay**: Import TavernAI PNG character cards and roleplay with local LLMs.
-- **📝 Obsidian-Style Notes**: A built-in markdown editor and Vault system to manage your personal knowledge base.
-- **🎤 Audio Import**: Speak directly to Horizon using the integrated microphone interface, powered by local **Faster-Whisper** transcription.
+### 🤖 Native Agentic Loop (Ollama Tool Calling)
+- **Tool-Calling Engine**: Replaced legacy tag+regex parsing with **native tool calling** (optimized for `qwen2.5-coder:14b`).
+- **Autonomous Action**: Horizon can now independently **read/write/edit files, run terminal commands, and search the web** in a multi-turn reasoning loop.
+- **Enhanced Reliability**: New "llm-done" payload system ensures final responses are never lost, even after complex tool sequences.
 
-## 🛠️ System Architecture
+### 🛡️ ARMATA Tactical Dashboard
+- **Live Command Center**: A new 2×2 agent grid for monitoring background processes.
+- **Agent Daemons**:
+  - **Archivist**: Real-time file watcher that automatically indexes your workspace.
+  - **Vanguard**: Background RSS/Atom scanner with LLM summarization.
+  - **Forge**: Autonomous vault health automation and Hub discovery.
+- **VRAM Monitor**: Real-time VRAM tracking and resource queueing to prevent OOMs when running LLMs and Diffusion models simultaneously.
 
-Horizon is built for performance and absolute local control:
-- **Frontend**: Ultra-light Vanilla JS and CSS. No heavy frameworks.
-- **Backend**: Rust (Tauri v2) for native OS integration and blazing-fast IPC.
-- **AI Engine**: Ollama (LLM) and ComfyUI (Vision/Diffusion).
-- **Security**: Strict CSP, validated system paths, and isolated UI panels.
+### 🛰️ Antenna (Mobile Bridge)
+- **Remote Access**: Secure HTTP bridge (Axum-based) allowing you to send commands to your local Horizon instance from mobile devices (Bearer token authenticated).
+
+### 🛠️ Infrastructure & Security
+- **Cross-Distro Support**: Refactored `install.sh` and `update.sh` with native support for Arch, Debian/Ubuntu, Fedora, and openSUSE.
+- **Security Sandboxing**: New `bwrap` (Bubblewrap) integration for safer terminal command execution.
+- **Command Allowlist**: Hardcoded security guards prevent RCE via the mobile bridge.
 
 ## 🚀 Installation
 
-### 🐧 Linux (Arch)
+### 🐧 Linux (Recommended)
+
+Horizon V4 is optimized for Linux with CUDA support.
 
 1. **Clone the repository:**
    ```bash
@@ -50,47 +57,37 @@ Horizon is built for performance and absolute local control:
 
 2. **Run the Master Installer:**
    ```bash
+   chmod +x install.sh
    ./install.sh
    ```
-   *This script will automatically install system dependencies, Rust, Tauri CLI, download the required Ollama models, and set up the ComfyUI virtual environment.*
+   *This script automatically detects your package manager (pacman/apt/dnf/zypper), installs system dependencies, Rust, Ollama, and sets up the ComfyUI/Python environment.*
 
 3. **Launch:**
-   Open "Horizon" from your Linux application launcher, or run `~/.local/bin/horizon`.
+   Open "Horizon" from your application launcher, or run:
+   ```bash
+   ./update.sh --run
+   ```
 
-### 🪟 Windows
+### 🪟 Windows (Partial Support)
 
-1. **Download the installer:** grab the latest `Horizon_x.y.z_x64_en-US.msi` (or `..._x64-setup.exe`) from the [Releases page](https://github.com/suarezjoris/Horizon/releases).
-
-   > The installer is unsigned, so Windows SmartScreen may warn *"Windows protected your PC"*. Click **More info → Run anyway**.
-
-2. **Install it**, then provision the runtime (Python env, ComfyUI, models):
+1. **Prerequisites**: Install [Ollama for Windows](https://ollama.com) and [Git](https://git-scm.com/download/win).
+2. **Setup**:
    ```powershell
    powershell -ExecutionPolicy Bypass -File setup-windows.ps1
    ```
-   *Prerequisites: [Ollama for Windows](https://ollama.com) and [Git](https://git-scm.com/download/win). The script clones the source to `%USERPROFILE%\Projects\Horizon` and sets up the Python venv, ComfyUI, and the Pony XL model.*
+3. **Launch**: Open the Horizon executable (ensure Ollama is running).
+   *Note: Background daemons (ARMATA) and certain agent tools are currently Linux-optimized.*
 
-3. **Launch** "Horizon" from the Start Menu (make sure Ollama is running).
+## 🛠️ Maintenance & Updates
 
-   > **Note:** Chat, Roleplay, Notes, Web Search, Audio and Image Generation work on Windows. The **Code tab (Aider)** and **Cinema (video generation)** are Linux-only for now.
-
-## 🛡️ Diagnostics & Auto-Repair
-
-Horizon v2.05 features a built-in **System Health Diagnostic**. On launch, it verifies:
-- Ollama server status & model availability.
-- Python (`uv`) environment.
-- ComfyUI paths & virtual environments.
-- Vault directory integrity.
-
-If anything breaks (e.g., you moved a folder), the UI will provide a **"Fix"** button to auto-repair the configuration.
-
-You can also run a deep maintenance check at any time from the terminal:
+Keep your V4 instance healthy with the unified update utility:
 ```bash
 ./update.sh
 ```
-*This will pull the latest code, verify models, rebuild the Rust binary, and fix broken paths.*
+This script performs a deep health check, pulls code updates, migrates settings, and re-compiles the Rust core if necessary.
 
 ---
 
 <div align="center">
-  <i>"Cultivating dreams into digital reality."</i>
+  <i>"Local intelligence. Absolute freedom."</i>
 </div>
