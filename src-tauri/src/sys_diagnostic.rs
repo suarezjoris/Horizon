@@ -233,9 +233,13 @@ pub async fn fix_health_issue(name: String) -> Result<String, String> {
     match name.as_str() {
         "ComfyUI" => {
             let home = dirs::home_dir().ok_or("Home dir not found")?;
-            let search_root = home.join("Projects");
+            let candidates = ["Projects", "Horizon", "Projects/Horizon", "comfyui", "ComfyUI", ""];
+            let found = candidates.iter()
+                .map(|c| if c.is_empty() { home.clone() } else { home.join(c) })
+                .filter(|p| p.exists())
+                .find_map(|root| find_comfyui_main(&root, 4));
 
-            match find_comfyui_main(&search_root, 6) {
+            match found {
                 Some(path) => {
                     let mut settings = crate::settings::load();
                     settings.comfyui_path = path.to_string_lossy().into_owned();
