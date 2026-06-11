@@ -113,9 +113,13 @@ if [ ! -d "venv" ]; then
             --index-url https://download.pytorch.org/whl/cu121
     ~/.local/bin/uv pip install --python venv/bin/python3 -r requirements.txt -q 2>/dev/null \
         || venv/bin/python3 -m pip install -r requirements.txt -q
-    ~/.local/bin/uv pip install --python venv/bin/python3 opencv-python-headless imageio-ffmpeg sqlalchemy -q 2>/dev/null \
-        || venv/bin/python3 -m pip install opencv-python-headless imageio-ffmpeg sqlalchemy -q
+    ~/.local/bin/uv pip install --python venv/bin/python3 opencv-python-headless imageio-ffmpeg -q 2>/dev/null \
+        || venv/bin/python3 -m pip install opencv-python-headless imageio-ffmpeg -q
 fi
+
+# Always ensure extra deps are present (runs even if venv already existed)
+~/.local/bin/uv pip install --python venv/bin/python3 sqlalchemy -q 2>/dev/null \
+    || venv/bin/python3 -m pip install sqlalchemy -q
 
 mkdir -p "$MODELS_DIR"
 if [ ! -f "$MODELS_DIR/ponyDiffusionV6XL_v6.safetensors" ]; then

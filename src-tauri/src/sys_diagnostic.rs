@@ -245,10 +245,21 @@ pub async fn fix_health_issue(name: String) -> Result<String, String> {
                     settings.comfyui_path = path.to_string_lossy().into_owned();
                     crate::settings::save_settings(settings)?;
                     
-                    // Force spawn ComfyUI now that path is correct
                     crate::comfyui::spawn_comfyui()?;
 
-                    Ok(format!("ComfyUI found and started at {}", path.display()))
+                    // Wait for ComfyUI to bind port 8188 (up to 30s)
+                    let addr: std::net::SocketAddr = "127.0.0.1:8188".parse().unwrap();
+                    let timeout = std::time::Duration::from_millis(500);
+                    let ready = (0..60).any(|_| {
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                        std::net::TcpStream::connect_timeout(&addr, timeout).is_ok()
+                    });
+
+                    if ready {
+                        Ok(format!("ComfyUI started at {}", path.display()))
+                    } else {
+                        Err("ComfyUI launched but did not respond within 30s — check comfyui.log".into())
+                    }
                 }
                 None => Err("Could not find ComfyUI automatically. Please set path manually in settings.".into()),
             }
