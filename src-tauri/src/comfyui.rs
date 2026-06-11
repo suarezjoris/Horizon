@@ -1,7 +1,7 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::time::Duration;
 use tokio::time::sleep;
 use crate::{ollama, settings};
@@ -10,16 +10,6 @@ use crate::{ollama, settings};
 pub struct GenerateImageResult {
     pub bytes: Vec<u8>,
     pub comfyui_path: String,
-}
-
-pub struct ComfyManager {
-    pub child: Option<Child>,
-}
-
-impl ComfyManager {
-    pub fn new() -> Self {
-        Self { child: None }
-    }
 }
 
 #[tauri::command]

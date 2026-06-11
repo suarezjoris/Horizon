@@ -58,7 +58,7 @@ async fn chat(
         .to_string();
 
     // RAG: pull the most relevant vault chunks using emergent brain logic
-    let mut context = memory::get_context(&user_msg).await;
+    let context = memory::get_context(&user_msg).await;
 
 
     // Load Persona / System Prompt
@@ -150,8 +150,7 @@ async fn chat(
 
         loop {
             if tool_call_count >= MAX_TOOL_CALLS {
-                let _ = app.emit("llm-token", "\n\n*Agent: limite de 10 actions atteinte.*");
-                let _ = app.emit("llm-done", "");
+                let _ = app.emit("llm-done", "*Agent: limite de 10 actions atteinte.*");
                 return Ok(());
             }
 
@@ -164,8 +163,7 @@ async fn chat(
             ).await {
                 Ok(m) => m,
                 Err(e) => {
-                    let _ = app.emit("llm-token", format!("\n\n*Erreur Ollama: {}*", e));
-                    let _ = app.emit("llm-done", "");
+                    let _ = app.emit("llm-done", format!("*Erreur Ollama: {}*", e));
                     return Ok(());
                 }
             };
@@ -217,7 +215,7 @@ async fn chat(
                             }));
                         }
                         Err(e) => {
-                            let is_guidance_error = e.contains("edit_file");
+                            let is_guidance_error = tc.function.name == "edit_file";
                             if !is_guidance_error {
                                 error_count += 1;
                                 had_errors = true;
@@ -235,9 +233,8 @@ async fn chat(
                             }));
 
                             if error_count >= 3 {
-                                let _ = app.emit("llm-token",
-                                    "\n\n*Agent interrompu après 3 erreurs consécutives.*");
-                                let _ = app.emit("llm-done", "");
+                                let _ = app.emit("llm-done",
+                                    "*Agent interrompu après 3 erreurs consécutives.*");
                                 let sema = vram_queue.semaphore();
                                 let um = user_msg.clone();
                                 tokio::spawn(async move {
@@ -266,21 +263,15 @@ async fn chat(
                         "content": "Error: Invalid JSON schema for tool call. Please use the tool_calls field, not raw text."
                     }));
                     if error_count >= 3 {
-                        let _ = app.emit("llm-token", "\n\n*Agent interrompu après 3 erreurs.*");
-                        let _ = app.emit("llm-done", "");
+                        let _ = app.emit("llm-done", "*Agent interrompu après 3 erreurs.*");
                         return Ok(());
                     }
                     continue;
                 }
 
-                // Final text response — stream it
+                // Final text response — pass as llm-done payload so frontend renders markdown
                 let final_text = content.clone();
-                current_messages.push(serde_json::json!({
-                    "role": "assistant",
-                    "content": &final_text
-                }));
-                ollama::chat_stream(app.clone(), current_messages.clone(), &active_model, false).await?;
-                let _ = app.emit("llm-done", "");
+                let _ = app.emit("llm-done", &final_text);
 
                 if had_errors {
                     let sema = vram_queue.semaphore();

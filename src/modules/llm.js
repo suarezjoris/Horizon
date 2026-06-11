@@ -315,6 +315,38 @@ async function send() {
   if (unlistenToken) { await unlistenToken(); unlistenToken = null; }
   if (unlistenDone)  { await unlistenDone();  unlistenDone = null; }
 
+  // Agent V4 event handlers
+  let unlistenThinking, unlistenToolStart, unlistenToolDone, unlistenToolError;
+  const cleanupAgentListeners = async () => {
+    if (unlistenThinking)  { await unlistenThinking();  unlistenThinking = null; }
+    if (unlistenToolStart) { await unlistenToolStart(); unlistenToolStart = null; }
+    if (unlistenToolDone)  { await unlistenToolDone();  unlistenToolDone = null; }
+    if (unlistenToolError) { await unlistenToolError(); unlistenToolError = null; }
+  };
+
+  unlistenThinking = await listen('agent-thinking', e => {
+    if (e.payload) {
+      streamingBubble.textContent = '...';
+    }
+  });
+
+  unlistenToolStart = await listen('agent-tool-start', e => {
+    const { tool, args } = e.payload;
+    const argStr = Object.entries(args || {}).map(([k,v]) => `${k}=${JSON.stringify(v)}`).join(', ');
+    streamingBubble.textContent = `[${tool}(${argStr})]`;
+  });
+
+  unlistenToolDone = await listen('agent-tool-done', e => {
+    const { tool, result, ms } = e.payload;
+    const preview = (result || '').substring(0, 80).replace(/\n/g, ' ');
+    streamingBubble.textContent = `[${tool} → ${preview || '(done)'}]`;
+  });
+
+  unlistenToolError = await listen('agent-tool-error', e => {
+    const { tool, error } = e.payload;
+    streamingBubble.textContent = `[${tool} error: ${error}]`;
+  });
+
   unlistenToken = await listen('llm-token', async e => {
     if (e.payload === "CLEAR_AND_SEARCH") {
       accumulatedText = "*🌐 Horizon is searching the web...*\n\n";
@@ -361,6 +393,7 @@ async function send() {
     sendBtn.disabled = false;
     await unlistenToken(); unlistenToken = null;
     await unlistenDone();  unlistenDone = null;
+    await cleanupAgentListeners();
 
     // Cross-module trigger: switch to Image tab if LLM requests image generation
     const match = fullMsg.match(/GENERATE_IMAGE:(.+)/);
@@ -388,6 +421,7 @@ async function send() {
     streamingBubble.textContent = `Error: ${err}`;
     streamingBubble.classList.remove('streaming');
     sendBtn.disabled = false;
+    await cleanupAgentListeners();
   }
 }
 

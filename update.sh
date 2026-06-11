@@ -34,7 +34,7 @@ fi
 # ── 3. ComfyUI deps (only if venv exists) ────────────────────────────────────
 if [ -d "$PROJECT_ROOT/ComfyUI/venv" ]; then
     echo "🛠  Repairing ComfyUI dependencies..."
-    "$PROJECT_ROOT/ComfyUI/venv/bin/pip" install -q \
+    "$PROJECT_ROOT/ComfyUI/venv/bin/python3" -m pip install -q \
         opencv-python-headless imageio-ffmpeg
 fi
 
@@ -53,12 +53,13 @@ with open(cfg) as f:
 changed = False
 
 # Remove legacy model references
+LEGACY_MODELS = ("dolphin-mixtral:8x7b", "dolphin-mixtral", "qwen2.5-coder:14b")
 for key in ("llm_model", "roleplay_model"):
-    if s.get(key) in ("dolphin-mixtral:8x7b", "dolphin-mixtral"):
+    if s.get(key) in LEGACY_MODELS:
         s[key] = "qwen2.5:14b"
         changed = True
 
-if s.get("agents", {}).get("light_model") in ("dolphin-mixtral:8x7b", "dolphin-mixtral"):
+if s.get("agents", {}).get("light_model") in LEGACY_MODELS:
     s["agents"]["light_model"] = "qwen2.5:14b"
     changed = True
 

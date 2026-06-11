@@ -4,17 +4,40 @@ use tauri::Emitter;
 const TOP_K: usize = 3; 
 const MAX_CONTEXT_CHARS: usize = 4000; 
 
+fn is_introspective_query(q: &str) -> bool {
+    let q = q.to_lowercase();
+    // Personal-pronoun or memory-recall patterns in French and English
+    let markers = [
+        "mon ", "mes ", "ma ", "moi", "je ", "j'", "selon ta", "ta mémoire", "ta memoire",
+        "my ", "about me", "who am i", "i am", "my project", "what do i",
+    ];
+    markers.iter().any(|m| q.contains(m))
+}
+
 pub async fn get_context(query: &str) -> String {
     let s = settings::load();
     let index = embeddings::load_index(&s.embeddings_path);
     let mut blocks = Vec::new();
     let mut current_len = 0;
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // For introspective queries, always lead with identity.md and passions.md
+    // — embedding similarity on French queries misses these critical notes
+    if is_introspective_query(query) {
+        for anchor in &["identity.md", "passions.md", "tech_stack.md"] {
+            if let Ok(c) = vault::read_vault_note(&s.vault_path, anchor) {
+                seen.insert(anchor.to_string());
+                let block = format!("### {}\n{}", anchor, c);
+                current_len += block.len();
+                blocks.push(block);
+            }
+        }
+    }
 
     if !index.is_empty() {
         if let Ok(vecs) = ollama::embed(vec![query.to_string()], "nomic-embed-text:latest").await {
             if let Some(qvec) = vecs.into_iter().next() {
                 let results = embeddings::search(&index, &qvec, TOP_K);
-                let mut seen: std::collections::HashSet<String> = std::collections::HashSet::with_capacity(TOP_K * 3);
 
                 for entry in results {
                     if current_len >= MAX_CONTEXT_CHARS { break; }
@@ -79,10 +102,21 @@ pub async fn process_calibration(text: String) -> Result<String, String> {
     Ok("Calibration complete. Emergent brain mapped.".to_string())
 }
 
-pub async fn extract_and_save(user_msg: String, ai_msg: String) {
+pub async fn extract_and_save(user_msg: String, ai_msg: String, vram: std::sync::Arc<tokio::sync::Semaphore>) {
+    // Skip trivial exchanges — nothing worth extracting
+    if user_msg.trim().len() < 30 {
+        return;
+    }
+
+    // Non-blocking: if GPU is busy, skip extraction rather than queuing behind foreground work
+    let _permit = match std::sync::Arc::clone(&vram).try_acquire_owned() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+
     let s = settings::load();
     let existing_notes = vault::list_notes();
-    
+
     let prompt = format!(
         "Act as a high-level cognitive archiver. Analyze this interaction to update the user's Second Brain.
 
@@ -93,16 +127,16 @@ pub async fn extract_and_save(user_msg: String, ai_msg: String) {
         2. Decide which note(s) to update or if a NEW note should be created.
         3. Extract atomic facts and use [[wikilinks]] to connect to other existing or potential notes.
         4. Output format: RAW JSON array of objects.
-        
+
         Exchange:
         User: {}
         AI: {}
-        
+
         Format Example: [{{ \"file\": \"projects/lox.md\", \"fact\": \"User is building an interpreter in [[Python]] from scratch.\" }}]",
         existing_notes, user_msg, ai_msg
     );
 
-    let Ok(resp) = ollama::chat_once(vec![serde_json::json!({"role": "user", "content": prompt})], &s.llm_model).await else {
+    let Ok(resp) = ollama::chat_once(vec![serde_json::json!({"role": "user", "content": prompt})], &s.agents.light_model).await else {
         return;
     };
 
@@ -243,12 +277,6 @@ fn normalize_wikilinks(text: &str, note_stems: &[String]) -> String {
         result = result.replace(&from, &to);
     }
     result
-}
-
-fn sanitize_for_json(s: &str) -> String {
-    s.chars()
-        .map(|c| if c.is_control() && c != '\n' && c != '\r' && c != '\t' { ' ' } else { c })
-        .collect()
 }
 
 const ARCHIVE_PREFIXES: &[&str] = &["vanguard/", "knowledge/", "images/", "characters/"];
@@ -602,9 +630,6 @@ Output ONLY the final markdown, nothing else.\n\nNOTE:\n{}",
     refined
 }
 
-const BATCH_SIZE: usize = 8;
-const FILE_CAP: usize = 1_800;
-
 pub async fn distill_vanguard_to_hubs(app: Option<&tauri::AppHandle>) -> usize {
     let s = settings::load();
     let vanguard_dir = std::path::PathBuf::from(&s.vault_path).join("vanguard");
@@ -648,9 +673,6 @@ pub async fn distill_vanguard_to_hubs(app: Option<&tauri::AppHandle>) -> usize {
             if !vault_kws.is_empty() && crate::vanguard::relevance_score(title, article, &vault_kws) == 0 {
                 continue;
             }
-
-            let topics = detect_topics(title, article);
-            let hub = topics.into_iter().find(|t| t != "notes").unwrap_or_else(|| "notes".to_string());
 
             let vram_permit = {
                 if let Some(app) = app {
@@ -699,7 +721,7 @@ Title: {}\n\n{}",
             let final_hub = if known_hubs.contains(&llm_hub) { llm_hub } else { "notes".to_string() };
             let hub_file = format!("{}.md", final_hub);
             if vault::validate_rel_path(&hub_file).is_ok() {
-                let entry = format!("\n{}", facts);
+                let entry = format!("\n<!-- forge-fact:start -->\n{}\n<!-- forge-fact:end -->", facts);
                 let _ = vault::append_note(&s.vault_path, &hub_file, &entry);
                 facts_this_digest += 1;
 

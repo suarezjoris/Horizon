@@ -106,10 +106,10 @@ if [ ! -d "venv" ]; then
         torch torchvision torchaudio \
         --index-url https://download.pytorch.org/whl/cu121 \
         --python venv/bin/python3 2>/dev/null \
-        || venv/bin/pip install torch torchvision torchaudio \
+        || venv/bin/python3 -m pip install torch torchvision torchaudio \
             --index-url https://download.pytorch.org/whl/cu121
-    venv/bin/pip install -r requirements.txt -q
-    venv/bin/pip install opencv-python-headless imageio-ffmpeg -q
+    venv/bin/python3 -m pip install -r requirements.txt -q
+    venv/bin/python3 -m pip install opencv-python-headless imageio-ffmpeg -q
 fi
 
 mkdir -p "$MODELS_DIR"

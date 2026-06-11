@@ -41,11 +41,6 @@ fn cosine_similarity_precalc(a: &[f32], b: &[f32], ma: f32) -> f32 {
     if ma == 0.0 || mb == 0.0 { 0.0 } else { dot / (ma * mb) }
 }
 
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    let ma: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    cosine_similarity_precalc(a, b, ma)
-}
-
 pub fn save_index(index: &[Entry], path: &str) {
     if let Some(parent) = std::path::Path::new(path).parent() {
         let _ = fs::create_dir_all(parent);

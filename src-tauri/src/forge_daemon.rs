@@ -144,6 +144,98 @@ async fn ingest_binary(app: &AppHandle, path: &PathBuf, vault_path: &str, model:
     emit_status(app, &format!("Ingested: {} → knowledge/{}.md", filename, slug));
 }
 
+fn is_garbage_root_note(content: &str) -> bool {
+    let t = content.trim();
+    if t.is_empty() { return true; }
+
+    // Every legitimate personal note has a # header
+    if !t.lines().any(|l| l.starts_with("# ")) { return true; }
+
+    // Has header, but body is only bullet lines with no wikilinks to real notes
+    // (prose content < 15 words means the "description" is trivially thin)
+    let has_wikilinks = t.contains("[[");
+    if has_wikilinks { return false; }
+
+    let prose_words: usize = t.lines()
+        .filter(|l| !l.starts_with('#') && !l.starts_with("- ") && !l.trim().is_empty())
+        .map(|l| l.split_whitespace().count())
+        .sum();
+
+    let only_bullets = t.lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .all(|l| l.starts_with("- ") || l.starts_with("Topics:"));
+
+    prose_words < 15 && only_bullets
+}
+
+fn strip_forge_injections(content: &str) -> String {
+    let mut out = String::with_capacity(content.len());
+    let mut skip = false;
+    for line in content.lines() {
+        if line.trim() == "<!-- forge-fact:start -->" { skip = true; continue; }
+        if line.trim() == "<!-- forge-fact:end -->" { skip = false; continue; }
+        if !skip { out.push_str(line); out.push('\n'); }
+    }
+    let trimmed = out.trim_end().to_string();
+    if trimmed.is_empty() { trimmed } else { trimmed + "\n" }
+}
+
+async fn audit_vault_quality(app: &AppHandle) {
+    let s = crate::settings::load();
+    let vault = PathBuf::from(&s.vault_path);
+    let hub_names: std::collections::HashSet<String> = crate::memory::all_hub_names().into_iter().collect();
+
+    let mut deleted: Vec<String> = Vec::new();
+    let mut cleaned: Vec<String> = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(&vault) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() { continue; }
+            let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            if !name.ends_with(".md") { continue; }
+            let stem = name.trim_end_matches(".md").to_string();
+            if hub_names.contains(&stem) { continue; }
+            if stem.starts_with("digest-") { continue; }
+
+            let content = std::fs::read_to_string(&path).unwrap_or_default();
+            if is_garbage_root_note(&content) {
+                if std::fs::remove_file(&path).is_ok() {
+                    deleted.push(stem);
+                }
+            }
+        }
+    }
+
+    for hub in &hub_names {
+        let path = vault.join(format!("{}.md", hub));
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if !content.contains("<!-- forge-fact:start -->") { continue; }
+        let stripped = strip_forge_injections(&content);
+        if stripped != content {
+            if std::fs::write(&path, &stripped).is_ok() {
+                cleaned.push(hub.clone());
+            }
+        }
+    }
+
+    match (deleted.is_empty(), cleaned.is_empty()) {
+        (true, true) => emit_status(app, "Quality audit: vault clean"),
+        _ => {
+            if !deleted.is_empty() {
+                emit_status(app, &format!("Quality audit: purged {} spurious note(s): {}", deleted.len(), deleted.join(", ")));
+            }
+            if !cleaned.is_empty() {
+                emit_status(app, &format!("Quality audit: pruned stale injections in: {}", cleaned.join(", ")));
+            }
+            let _ = crate::embeddings::reindex().await;
+        }
+    }
+}
+
 pub async fn run_forge(app: AppHandle, running: Arc<AtomicBool>) {
     let s = crate::settings::load();
     let vault_path = s.vault_path.clone();
@@ -170,6 +262,8 @@ pub async fn run_forge(app: AppHandle, running: Arc<AtomicBool>) {
             p, r, c
         )),
     }
+
+    audit_vault_quality(&app).await;
 
     emit_status(&app, "Distilling Vanguard news into brain…");
     let learned = crate::memory::distill_vanguard_to_hubs(Some(&app)).await;
@@ -204,8 +298,10 @@ pub async fn run_forge(app: AppHandle, running: Arc<AtomicBool>) {
     let mut last_consolidation: Option<Instant> = None;
     let mut last_orphan_scan = Instant::now();
     let mut last_hub_scan = Instant::now();
+    let mut last_quality_audit = Instant::now();
     let orphan_interval = Duration::from_secs(2 * 60 * 60);
-    let hub_scan_interval = Duration::from_secs(4 * 60 * 60); // every 4h regardless of file activity
+    let hub_scan_interval = Duration::from_secs(4 * 60 * 60);
+    let audit_interval = Duration::from_secs(24 * 60 * 60);
     let debounce = Duration::from_secs(60);
     let consolidation_cooldown = Duration::from_secs(10 * 60);
 
@@ -290,6 +386,11 @@ pub async fn run_forge(app: AppHandle, running: Arc<AtomicBool>) {
         if last_hub_scan.elapsed() >= hub_scan_interval {
             last_hub_scan = Instant::now();
             crate::memory::propose_new_hubs(&app).await;
+        }
+
+        if last_quality_audit.elapsed() >= audit_interval {
+            last_quality_audit = Instant::now();
+            audit_vault_quality(&app).await;
         }
     }
 

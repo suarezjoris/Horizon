@@ -86,6 +86,7 @@ pub async fn toggle_agent(app: AppHandle, agent: String, enabled: bool) -> Resul
         "vanguard" => s.agents.vanguard_enabled = enabled,
         "antenna" => s.agents.antenna_enabled = enabled,
         "forge" => s.agents.forge_enabled = enabled,
+        "wiki" => s.agents.wiki_enabled = enabled,
         _ => return Err(format!("Unknown agent: {}", agent)),
     }
 
@@ -109,6 +110,7 @@ pub fn get_armata_status() -> serde_json::Value {
         "vanguard": s.agents.vanguard_enabled,
         "antenna": s.agents.antenna_enabled,
         "forge": s.agents.forge_enabled,
+        "wiki": s.agents.wiki_enabled,
         "antenna_port": s.agents.antenna_port,
         "vanguard_interval": s.agents.vanguard_interval_minutes,
         "light_model": s.agents.light_model,
@@ -174,11 +176,12 @@ fn os_tool_run(cmd: &str) -> Result<String, String> {
     if words.contains(&"status") {
         let s = settings::load();
         return Ok(format!(
-            "ARMATA STATUS\nArchivist: {}\nVanguard: {}\nAntenna: {}:{}",
+            "ARMATA STATUS\nArchivist: {}\nVanguard: {}\nAntenna: {}:{}\nWiki: {}",
             if s.agents.archivist_enabled { "ONLINE" } else { "OFFLINE" },
             if s.agents.vanguard_enabled { "ONLINE" } else { "OFFLINE" },
             if s.agents.antenna_enabled { "ONLINE" } else { "OFFLINE" },
             s.agents.antenna_port,
+            if s.agents.wiki_enabled { "ONLINE" } else { "OFFLINE" },
         ));
     }
 

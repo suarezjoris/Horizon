@@ -76,6 +76,18 @@ pub fn edit_file(workspace: &Path, path: &str, search: &str, replace: &str) -> R
     Ok(format!("File edited: {}", path))
 }
 
+pub fn append_file(workspace: &Path, path: &str, content: &str) -> Result<String, String> {
+    let abs = safe_join(workspace, Path::new(path))?;
+    if !abs.exists() {
+        return Err(format!("File '{}' does not exist. Use write_file to create it first.", path));
+    }
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new().append(true).open(&abs)
+        .map_err(|e| format!("Cannot open '{}': {}", path, e))?;
+    f.write_all(content.as_bytes()).map_err(|e| format!("Cannot append to '{}': {}", path, e))?;
+    Ok(format!("Appended to: {}", path))
+}
+
 pub fn list_files(workspace: &Path, dir: &str) -> Result<String, String> {
     let abs = safe_join(workspace, Path::new(dir))?;
     let entries = std::fs::read_dir(&abs)
@@ -88,7 +100,11 @@ pub fn list_files(workspace: &Path, dir: &str) -> Result<String, String> {
         })
         .collect();
     lines.sort();
-    Ok(lines.join("\n"))
+    if lines.is_empty() {
+        Ok("(directory is empty)".to_string())
+    } else {
+        Ok(lines.join("\n"))
+    }
 }
 
 pub fn bwrap_available() -> bool {
@@ -133,6 +149,8 @@ pub async fn bash(workspace: &Path, command: &str) -> Result<String, String> {
 
     let result = if !output.status.success() {
         format!("exit {}\n{}", output.status.code().unwrap_or(-1), combined)
+    } else if combined.is_empty() {
+        "(command completed with no output)".to_string()
     } else {
         combined
     };
@@ -185,8 +203,23 @@ pub fn build_tool_definitions(include_bash: bool) -> Vec<serde_json::Value> {
         serde_json::json!({
             "type": "function",
             "function": {
+                "name": "append_file",
+                "description": "Append text to the end of an existing file. Use this to add lines to a file.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path":    { "type": "string" },
+                        "content": { "type": "string", "description": "Text to append (include leading newline if needed)" }
+                    },
+                    "required": ["path", "content"]
+                }
+            }
+        }),
+        serde_json::json!({
+            "type": "function",
+            "function": {
                 "name": "edit_file",
-                "description": "Surgically edit an existing file using SEARCH/REPLACE. Finds the exact 'search' text and replaces it with 'replace'. Fails if search text is not found.",
+                "description": "Surgically edit an existing file using SEARCH/REPLACE. The 'search' text must EXACTLY match content from read_file. Use append_file instead for simply adding lines.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -337,6 +370,7 @@ pub async fn execute(
             read_file(workspace, get("path")?, offset)
         }
         "write_file"  => write_file(workspace, get("path")?, get("content")?),
+        "append_file" => append_file(workspace, get("path")?, get("content")?),
         "edit_file"   => edit_file(workspace, get("path")?, get("search")?, get("replace")?),
         "list_files"  => list_files(workspace, get("dir")?),
         "bash"        => bash(workspace, get("command")?).await,

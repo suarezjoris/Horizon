@@ -3,44 +3,30 @@ use tokio::sync::{Semaphore, OwnedSemaphorePermit};
 
 pub struct VramQueue {
     semaphore: Arc<Semaphore>,
-    current_user: Arc<std::sync::Mutex<String>>,
 }
 
 impl VramQueue {
     pub fn new() -> Self {
         Self {
             semaphore: Arc::new(Semaphore::new(1)),
-            current_user: Arc::new(std::sync::Mutex::new(String::new())),
         }
     }
 
     /// Async acquire — waits until the GPU slot is free.
-    pub async fn acquire(&self, label: &str) -> Result<OwnedSemaphorePermit, String> {
-        let permit = Arc::clone(&self.semaphore)
+    pub async fn acquire(&self, _label: &str) -> Result<OwnedSemaphorePermit, String> {
+        Arc::clone(&self.semaphore)
             .acquire_owned()
             .await
-            .map_err(|e| e.to_string())?;
-        *self.current_user.lock().unwrap() = label.to_string();
-        Ok(permit)
+            .map_err(|e| e.to_string())
     }
 
     /// Non-blocking try. Returns None if GPU is busy.
-    pub fn try_acquire(&self, label: &str) -> Option<OwnedSemaphorePermit> {
-        match Arc::clone(&self.semaphore).try_acquire_owned() {
-            Ok(permit) => {
-                *self.current_user.lock().unwrap() = label.to_string();
-                Some(permit)
-            }
-            Err(_) => None,
-        }
+    pub fn try_acquire(&self, _label: &str) -> Option<OwnedSemaphorePermit> {
+        Arc::clone(&self.semaphore).try_acquire_owned().ok()
     }
 
-    pub fn current_user(&self) -> String {
-        self.current_user.lock().unwrap().clone()
-    }
-
-    pub fn is_free(&self) -> bool {
-        self.semaphore.available_permits() == 1
+    pub fn semaphore(&self) -> Arc<Semaphore> {
+        Arc::clone(&self.semaphore)
     }
 }
 

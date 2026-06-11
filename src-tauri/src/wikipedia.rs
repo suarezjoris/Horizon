@@ -130,10 +130,3 @@ pub async fn ingest_wikipedia(app: AppHandle) -> Result<String, String> {
         saved, total, indexed
     ))
 }
-
-pub fn search_wikipedia(query: &str) -> Option<String> {
-    // ZIM-based search disabled (zim 0.4 crate incompatible with modern Kiwix format)
-    // Wikipedia context is now provided via ingested knowledge/wiki-*.md vault notes
-    let _ = query;
-    None
-}

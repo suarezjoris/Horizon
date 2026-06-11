@@ -17,9 +17,8 @@ pub enum DocxElement {
         text: String, 
         level: usize 
     },
-    List { 
-        items: Vec<String>, 
-        #[serde(default)] ordered: bool 
+    List {
+        items: Vec<String>,
     },
     Metadata { 
         label: String, 
@@ -119,7 +118,7 @@ pub async fn generate_docx(content: DocxContent) -> Result<String, String> {
                     .align(alignment)
                     .line_spacing(LineSpacing::new().after(200)));
             },
-            DocxElement::List { items, ordered: _ } => {
+            DocxElement::List { items } => {
                 for item in items {
                     doc = doc.add_paragraph(Paragraph::new()
                         .add_run(Run::new().add_text(format!("• {}", item)).size(22))

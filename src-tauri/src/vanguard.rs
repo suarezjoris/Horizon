@@ -430,11 +430,17 @@ pub async fn run_vanguard(app: AppHandle, running: Arc<AtomicBool>) {
 
     scan_sources(&app).await;
 
-    let mut interval = tokio::time::interval(Duration::from_secs(interval_minutes * 60));
-    interval.tick().await;
-
     loop {
-        interval.tick().await;
+        let mut remaining = interval_minutes * 60;
+        while remaining > 0 {
+            if !running.load(Ordering::Relaxed) {
+                emit_status(&app, "offline", "Vanguard stopped");
+                return;
+            }
+            tokio::time::sleep(Duration::from_secs(remaining.min(5))).await;
+            remaining = remaining.saturating_sub(5);
+        }
+
         if !running.load(Ordering::Relaxed) { break; }
         scan_sources(&app).await;
     }
