@@ -24,11 +24,13 @@ mod vanguard;
 mod antenna;
 mod forge_daemon;
 mod wiki_daemon;
+mod pax_daemon;
 mod tools;
 
 use tauri::{Emitter, Manager};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::collections::HashMap;
+use tokio::sync::mpsc;
 
 struct ArmataState {
     running_flags: std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>,
@@ -44,7 +46,7 @@ async fn chat(
 ) -> Result<(), String> {
     let _permit = vram_queue.acquire("LLM Chat").await?;
     let s = settings::load();
-    
+
     // Choose model: override > settings default
     let active_model = model.unwrap_or(s.llm_model.clone());
 
@@ -56,6 +58,8 @@ async fn chat(
         .and_then(|m| m.get("content").and_then(|c| c.as_str()))
         .unwrap_or("")
         .to_string();
+
+    pax_daemon::touch_activity(&user_msg);
 
     // RAG: pull the most relevant vault chunks using emergent brain logic
     let context = memory::get_context(&user_msg).await;
@@ -577,6 +581,11 @@ async fn toggle_agent_daemon(
                         wiki_daemon::run_wiki_agent(app_clone, flag_clone).await;
                     });
                 }
+                "pax" => {
+                    tokio::spawn(async move {
+                        pax_daemon::run_pax(app_clone, flag_clone).await;
+                    });
+                }
                 _ => return Err(format!("Unknown agent: {}", agent)),
             }
 
@@ -605,6 +614,9 @@ fn main() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            let (pax_tx, pax_rx) = mpsc::channel::<pax_daemon::PaxEvent>(16);
+            app.manage(pax_daemon::PaxEventSender(pax_tx.clone()));
+
             let s = settings::load();
             let handle = app.handle().clone();
 
@@ -643,6 +655,28 @@ fn main() {
                 let f2 = flag.clone();
                 app.state::<ArmataState>().running_flags.lock().unwrap().insert("wiki".into(), flag);
                 tauri::async_runtime::spawn(async move { wiki_daemon::run_wiki_agent(app2, f2).await; });
+            }
+            if s.agents.pax_enabled {
+                let flag = Arc::new(AtomicBool::new(true));
+                let app2 = handle.clone();
+                let f2 = flag.clone();
+                app.state::<ArmataState>().running_flags.lock().unwrap().insert("pax".into(), flag);
+                tauri::async_runtime::spawn(async move { pax_daemon::run_pax(app2, f2).await; });
+
+                let app3 = handle.clone();
+                let tx_banner = pax_tx.clone();
+                tauri::async_runtime::spawn(async move {
+                    pax_daemon::run_pax_banner(pax_rx, tx_banner, app3).await;
+                });
+
+                // Startup trigger : 45s de délai pour laisser l'utilisateur s'installer
+                let startup_tx = pax_tx.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(45)).await;
+                    let _ = startup_tx.send(pax_daemon::PaxEvent::Startup).await;
+                });
+            } else {
+                drop(pax_rx); // rx abandonné — try_send depuis Forge échouera silencieusement
             }
 
             Ok(())
@@ -698,6 +732,7 @@ fn main() {
             armata::toggle_agent,
             armata::get_armata_status,
             toggle_agent_daemon,
+            pax_daemon::trigger_pax,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
