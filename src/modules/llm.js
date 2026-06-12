@@ -306,6 +306,11 @@ async function send() {
 
   sendBtn.disabled = true;
   addBubble('user', displayText);
+  // If Pax injected a question visually, add it to history so the LLM has context
+  if (pendingPaxQuestion) {
+    messages.push({ role: 'assistant', content: pendingPaxQuestion });
+    pendingPaxQuestion = null;
+  }
   messages.push({ role: 'user', content: llmText });
 
   streamingBubble = addBubble('ai', '');
@@ -426,12 +431,12 @@ async function send() {
 }
 
 // Pax daemon — AI-initiated questions based on RAG gap detection
-// Only display visually — do NOT push to messages to avoid starting
-// the conversation with an assistant turn (Ollama rejects that).
+let pendingPaxQuestion = null;
 listen('pax-question', async event => {
   const question = event.payload?.question;
   if (!question) return;
   addBubble('ai', question);
+  pendingPaxQuestion = question;
 });
 
 // Drag and Drop support
@@ -481,6 +486,7 @@ document.getElementById('pax-banner-open')?.addEventListener('click', () => {
     if (!pendingPaxBannerQuestion) return;
     switchTab('llm');
     addBubble('ai', pendingPaxBannerQuestion);
+    pendingPaxQuestion = pendingPaxBannerQuestion; // inject as context on next user send
     history.scrollTop = history.scrollHeight;
     pendingPaxBannerQuestion = null;
 });
