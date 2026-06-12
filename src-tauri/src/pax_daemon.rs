@@ -9,14 +9,8 @@ use crate::{embeddings, settings, vault};
 const IDLE_THRESHOLD_SECS: u64 = 5;
 // Poll interval — fast so idle detection is responsive
 const CHECK_INTERVAL_SECS: u64 = 2;
-// Minimum wait after a question + reply cycle before Pax can ask again
-const QUESTION_COOLDOWN_SECS: u64 = 600; // 10 minutes
-// If user sent several messages quickly, even longer cooldown
-const MULTI_MSG_COOLDOWN_SECS: u64 = 60;
 // Window to count "multiple messages"
 const MULTI_MSG_WINDOW_SECS: u64 = 30;
-// Threshold: N messages within window = "multiple"
-const MULTI_MSG_THRESHOLD: u32 = 2;
 
 const RECENT_WINDOW_SECS: u64 = 48 * 3600;
 const MIN_CHUNKS_THRESHOLD: usize = 3;
@@ -325,7 +319,6 @@ pub async fn run_pax(app: AppHandle, running: Arc<AtomicBool>) {
         }
 
         let waiting      = WAITING_FOR_REPLY.load(Ordering::Relaxed);
-        let msg_count    = RECENT_MSG_COUNT.load(Ordering::Relaxed);
         let last_seen    = LAST_ACTIVITY.load(Ordering::Relaxed);
         let now          = now_secs();
 
@@ -335,17 +328,15 @@ pub async fn run_pax(app: AppHandle, running: Arc<AtomicBool>) {
             let since_q = last_q.elapsed().as_secs();
 
             if waiting {
-                // Pax asked — wait until user replies (touch_activity clears this).
+                if last_q.elapsed().as_secs() > 900 {
+                    WAITING_FOR_REPLY.store(false, Ordering::Relaxed);
+                    *LAST_QUALITY.lock().unwrap() = ReplyQuality::Ignored;
+                }
                 continue;
             }
 
             // Always enforce a minimum cooldown after any question + reply cycle.
-            let required = if msg_count >= MULTI_MSG_THRESHOLD {
-                MULTI_MSG_COOLDOWN_SECS.max(QUESTION_COOLDOWN_SECS)
-            } else {
-                QUESTION_COOLDOWN_SECS
-            };
-            if since_q < required { continue; }
+            if since_q < adaptive_cooldown(now) { continue; }
             RECENT_MSG_COUNT.store(0, Ordering::Relaxed);
         }
 
