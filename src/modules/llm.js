@@ -425,6 +425,15 @@ async function send() {
   }
 }
 
+// Pax daemon — AI-initiated questions based on RAG gap detection
+// Only display visually — do NOT push to messages to avoid starting
+// the conversation with an assistant turn (Ollama rejects that).
+listen('pax-question', async event => {
+  const question = event.payload?.question;
+  if (!question) return;
+  addBubble('ai', question);
+});
+
 // Drag and Drop support
 listen('tauri://file-drop', async event => {
   const activeTab = document.querySelector('.tab.active');
@@ -455,4 +464,28 @@ input.addEventListener('keydown', e => {
 input.addEventListener('input', () => {
   input.style.height = 'auto';
   input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+});
+
+// --- Pax banner (non-chat triggers: startup, forge, workspace) ---
+let pendingPaxBannerQuestion = null;
+
+listen('pax-banner', (event) => {
+    const q = event.payload.question;
+    pendingPaxBannerQuestion = q;
+    document.getElementById('pax-banner-question').textContent = q;
+    document.getElementById('pax-banner').style.display = 'block';
+});
+
+document.getElementById('pax-banner-open')?.addEventListener('click', () => {
+    document.getElementById('pax-banner').style.display = 'none';
+    if (!pendingPaxBannerQuestion) return;
+    switchTab('llm');
+    addBubble('ai', pendingPaxBannerQuestion);
+    history.scrollTop = history.scrollHeight;
+    pendingPaxBannerQuestion = null;
+});
+
+document.getElementById('pax-banner-dismiss')?.addEventListener('click', () => {
+    document.getElementById('pax-banner').style.display = 'none';
+    pendingPaxBannerQuestion = null;
 });

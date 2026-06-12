@@ -94,6 +94,15 @@
   </div>
 </div>
 
+<div id="pax-banner" style="display:none; position:fixed; bottom:80px; left:20px; z-index:9999; background:var(--bg-card,#1e1e2e); border:1px solid rgba(180,140,255,0.4); border-radius:14px; padding:16px 20px; max-width:340px; box-shadow:0 8px 32px rgba(0,0,0,0.5);">
+  <div style="font-size:12px; color:rgba(180,140,255,0.9); font-weight:700; margin-bottom:6px;">◈ PAX</div>
+  <div id="pax-banner-question" style="font-size:13px; color:rgba(255,255,255,0.85); margin-bottom:12px; line-height:1.5;"></div>
+  <div style="display:flex; gap:8px;">
+    <button id="pax-banner-open" style="flex:1; background:rgba(180,140,255,0.2); color:#fff; border:1px solid rgba(180,140,255,0.4); padding:8px; border-radius:8px; font-weight:700; cursor:pointer;">Ouvrir le chat</button>
+    <button id="pax-banner-dismiss" style="flex:0; background:transparent; color:rgba(255,255,255,0.4); border:none; padding:8px 10px; cursor:pointer; font-size:16px;">✕</button>
+  </div>
+</div>
+
 <div id="panels">
   <!-- LLM Panel -->
   <div class="panel active" id="panel-llm">
@@ -323,6 +332,17 @@
           </div>
           <div class="agent-status">Mobile HTTP Bridge</div>
           <div class="agent-log">IDLE</div>
+        </div>
+
+        <div class="agent-card" id="agent-pax">
+          <div class="agent-header">
+            <span class="agent-icon">🔮</span>
+            <span class="agent-name">Pax</span>
+            <div class="agent-toggle agent-toggle--static active" title="RAG Curiosity Engine"><div class="toggle-btn"></div></div>
+          </div>
+          <div class="agent-status">Watching for knowledge gaps…</div>
+          <div class="agent-log log-online">ONLINE</div>
+          <button id="trigger-pax" style="margin-top:6px;font-size:11px;padding:3px 8px;cursor:pointer;">Test now</button>
         </div>
 
       </div>
