@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering}
 use std::time::{Duration, Instant};
 use std::path::PathBuf;
 use once_cell::sync::Lazy;
+use tokio::sync::mpsc::Receiver;
 use tauri::{AppHandle, Emitter};
 use crate::{embeddings, settings, vault};
 
@@ -28,6 +29,16 @@ static RECENT_MSG_COUNT: Lazy<AtomicU32> = Lazy::new(|| AtomicU32::new(0));
 static LAST_ASKED_NOTE: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 // Notes Pax must avoid until their timestamp expires (avoid_until secs)
 static AVOIDED_NOTES: Lazy<Mutex<Vec<(String, u64)>>> = Lazy::new(|| Mutex::new(Vec::new()));
+
+static BANNER_LAST_SENT: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
+
+pub enum PaxEvent {
+    Startup,
+    ForgeStep { message: String },
+    WorkspaceChange,
+}
+
+pub struct PaxEventSender(pub tokio::sync::mpsc::Sender<PaxEvent>);
 
 #[derive(Clone, Copy, PartialEq)]
 enum ReplyQuality { Positive, Neutral, Ignored }
@@ -413,6 +424,70 @@ pub async fn trigger_pax(app: tauri::AppHandle) -> Result<String, String> {
             Ok(format!("Pax asked: {}", q))
         }
         None => Ok(format!("Pax: gap detected but score below threshold. Gap: {:?}", gaps[0])),
+    }
+}
+
+pub async fn run_pax_banner(
+    mut rx: Receiver<PaxEvent>,
+    tx: tokio::sync::mpsc::Sender<PaxEvent>,
+    app: AppHandle,
+) {
+    const BANNER_COOLDOWN_SECS: u64 = 1800;
+
+    // Watcher sur agent_workspace — thread bloquant séparé
+    let workspace = PathBuf::from(&settings::load().agent_workspace);
+    let tx_ws = tx.clone();
+    std::thread::spawn(move || {
+        use notify::{Watcher, RecursiveMode, recommended_watcher};
+        let (ntx, nrx) = std::sync::mpsc::channel();
+        if let Ok(mut w) = recommended_watcher(ntx) {
+            let _ = w.watch(&workspace, RecursiveMode::NonRecursive);
+            for res in nrx {
+                if let Ok(event) = res {
+                    let is_code = event.paths.iter().any(|p| {
+                        matches!(
+                            p.extension().and_then(|e| e.to_str()),
+                            Some("md" | "rs" | "py" | "txt")
+                        )
+                    });
+                    if is_code {
+                        let _ = tx_ws.blocking_send(PaxEvent::WorkspaceChange);
+                    }
+                }
+            }
+        }
+    });
+
+    while let Some(_event) = rx.recv().await {
+        let now = now_secs();
+        if now.saturating_sub(BANNER_LAST_SENT.load(Ordering::Relaxed)) < BANNER_COOLDOWN_SECS {
+            continue;
+        }
+
+        let s = settings::load();
+        let index = embeddings::load_index(&s.embeddings_path);
+        let gaps = find_gaps(&s.vault_path, &index);
+        if gaps.is_empty() { continue; }
+
+        use tauri::Manager;
+        let _permit = {
+            let q = app.state::<crate::vram_queue::VramQueue>();
+            match q.try_acquire("pax-banner") {
+                Some(p) => p,
+                None => continue,
+            }
+        };
+
+        if let Some(question) = evaluate_and_generate(&gaps[0], &s.agents.light_model).await {
+            if let Ok(mut last) = LAST_ASKED_NOTE.lock() {
+                *last = match &gaps[0] {
+                    GapKind::ThinNote { note, .. } => Some(note.clone()),
+                    GapKind::SemanticGap { note_a, .. } => Some(note_a.clone()),
+                };
+            }
+            BANNER_LAST_SENT.store(now, Ordering::Relaxed);
+            let _ = app.emit("pax-banner", serde_json::json!({ "question": question }));
+        }
     }
 }
 
