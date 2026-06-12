@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering}};
+use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}};
 use std::time::{Duration, Instant};
 use std::path::PathBuf;
 use once_cell::sync::Lazy;
@@ -10,8 +10,6 @@ use crate::{embeddings, settings, vault};
 const IDLE_THRESHOLD_SECS: u64 = 5;
 // Poll interval — fast so idle detection is responsive
 const CHECK_INTERVAL_SECS: u64 = 2;
-// Window to count "multiple messages"
-const MULTI_MSG_WINDOW_SECS: u64 = 30;
 
 const RECENT_WINDOW_SECS: u64 = 48 * 3600;
 const MIN_CHUNKS_THRESHOLD: usize = 3;
@@ -23,8 +21,6 @@ const SEMANTIC_NOTE_LIMIT: usize = 15;
 static LAST_ACTIVITY: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(0));
 // Pax asked a question and user hasn't replied yet
 static WAITING_FOR_REPLY: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
-// Count of rapid successive messages from user
-static RECENT_MSG_COUNT: Lazy<AtomicU32> = Lazy::new(|| AtomicU32::new(0));
 // Note that was the subject of the last Pax question
 static LAST_ASKED_NOTE: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 // Notes Pax must avoid until their timestamp expires (avoid_until secs)
@@ -85,13 +81,6 @@ fn avoid_last_note_for(duration_secs: u64) {
 pub fn touch_activity(msg: &str) {
     let now = now_secs();
     let prev = LAST_ACTIVITY.swap(now, Ordering::Relaxed);
-
-    // Track rapid successive messages for cooldown
-    if prev > 0 && now.saturating_sub(prev) <= MULTI_MSG_WINDOW_SECS {
-        RECENT_MSG_COUNT.fetch_add(1, Ordering::Relaxed);
-    } else {
-        RECENT_MSG_COUNT.store(1, Ordering::Relaxed);
-    }
 
     let was_waiting = WAITING_FOR_REPLY.swap(false, Ordering::Relaxed);
 
@@ -348,7 +337,6 @@ pub async fn run_pax(app: AppHandle, running: Arc<AtomicBool>) {
 
             // Always enforce a minimum cooldown after any question + reply cycle.
             if since_q < adaptive_cooldown(now) { continue; }
-            RECENT_MSG_COUNT.store(0, Ordering::Relaxed);
         }
 
         // ── Idle check ─────────────────────────────────────────────────────
