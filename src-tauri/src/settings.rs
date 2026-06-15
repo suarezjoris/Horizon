@@ -13,6 +13,7 @@ pub struct AgentSettings {
     pub antenna_enabled: bool,
     pub forge_enabled: bool,
     pub wiki_enabled: bool,
+
     /// Bearer token required for Antenna HTTP requests
     pub antenna_token: String,
     pub antenna_port: u16,
@@ -34,6 +35,7 @@ impl Default for AgentSettings {
             antenna_enabled: false,
             forge_enabled: true,
             wiki_enabled: true,
+
             antenna_token: "changeme".to_string(),
             antenna_port: 8374,
             vanguard_interval_minutes: 30,
@@ -53,6 +55,27 @@ pub struct ModelCapability {
     pub hash: String,
 }
 
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryDecayConfig {
+    pub enabled: bool,
+    pub half_life_days: f64,
+    pub access_boost_factor: f64,
+    pub min_score_threshold: f64,
+}
+
+impl Default for MemoryDecayConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            half_life_days: 30.0,
+            access_boost_factor: 0.1,
+            min_score_threshold: 0.05,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub vault_path: String,
@@ -66,6 +89,9 @@ pub struct Settings {
     pub agent_workspace: String,
     #[serde(default)]
     pub model_capabilities: HashMap<String, ModelCapability>,
+
+    #[serde(default)]
+    pub memory_decay: MemoryDecayConfig,
 }
 
 impl Default for Settings {
@@ -77,7 +103,7 @@ impl Default for Settings {
             llm_model: "qwen2.5-coder:14b".to_string(),
             roleplay_model: "llama3.1:8b".to_string(),
             comfyui_path: home.join("Projects/Horizon/ComfyUI/main.py").to_string_lossy().into_owned(),
-            embeddings_path: data.join("horizon/embeddings.bin").to_string_lossy().into_owned(),
+            embeddings_path: data.join("horizon/embeddings.tv").to_string_lossy().into_owned(),
             image_rating: "rating_safe".to_string(),
             agents: AgentSettings::default(),
             agent_workspace: {
@@ -89,6 +115,8 @@ impl Default for Settings {
                     .into_owned()
             },
             model_capabilities: HashMap::new(),
+
+            memory_decay: MemoryDecayConfig::default(),
         }
     }
 }

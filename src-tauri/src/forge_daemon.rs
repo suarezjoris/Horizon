@@ -96,14 +96,7 @@ fn emit_status(app: &AppHandle, msg: &str) {
     }));
 }
 
-fn notify_pax(app: &AppHandle, msg: &str) {
-    use tauri::Manager;
-    if let Some(sender) = app.try_state::<crate::pax_daemon::PaxEventSender>() {
-        let _ = sender.0.try_send(crate::pax_daemon::PaxEvent::ForgeStep {
-            message: msg.to_string(),
-        });
-    }
-}
+
 
 async fn ingest_binary(app: &AppHandle, path: &PathBuf, vault_path: &str, model: &str) {
     let filename = match path.file_name() {
@@ -278,13 +271,13 @@ pub async fn run_forge(app: AppHandle, running: Arc<AtomicBool>) {
     let learned = crate::memory::distill_vanguard_to_hubs(Some(&app)).await;
     if learned > 0 {
         emit_status(&app, &format!("Learned {} facts from Vanguard", learned));
-        notify_pax(&app, &format!("Learned {} facts from Vanguard", learned));
+
     }
 
     let refined = crate::memory::refine_messy_notes(Some(&app)).await;
     if refined > 0 {
         emit_status(&app, &format!("Refined {} messy notes", refined));
-        notify_pax(&app, &format!("Refined {} notes", refined));
+
     }
 
     let (tx, rx) = std::sync::mpsc::channel();
@@ -358,14 +351,14 @@ pub async fn run_forge(app: AppHandle, running: Arc<AtomicBool>) {
                 let learned = crate::memory::distill_vanguard_to_hubs(Some(&app)).await;
                 if learned > 0 {
                     emit_status(&app, &format!("Learned {} facts from Vanguard", learned));
-                    notify_pax(&app, &format!("Learned {} facts from Vanguard", learned));
+
                 }
 
                 emit_status(&app, "Refining notes…");
                 let refined = crate::memory::refine_messy_notes(Some(&app)).await;
                 if refined > 0 {
                     emit_status(&app, &format!("Refined {} notes", refined));
-                    notify_pax(&app, &format!("Refined {} notes", refined));
+
                 }
 
                 emit_status(&app, "Consolidating vault…");
@@ -374,7 +367,7 @@ pub async fn run_forge(app: AppHandle, running: Arc<AtomicBool>) {
                     Err(e) => emit_status(&app, &format!("Consolidation error: {}", e)),
                 }
 
-                crate::memory::propose_new_hubs(&app).await;
+                let _ = crate::memory::propose_new_hubs(&app, false).await;
             } else if t.elapsed() >= debounce && !pending.is_empty() && !cooled_down {
                 // Drain pending without running consolidation — cooldown not expired
                 pending.clear();
@@ -398,7 +391,7 @@ pub async fn run_forge(app: AppHandle, running: Arc<AtomicBool>) {
 
         if last_hub_scan.elapsed() >= hub_scan_interval {
             last_hub_scan = Instant::now();
-            crate::memory::propose_new_hubs(&app).await;
+            let _ = crate::memory::propose_new_hubs(&app, false).await;
         }
 
         if last_quality_audit.elapsed() >= audit_interval {

@@ -1,0 +1,11 @@
+{
+  "1": { "class_type": "LoadImage", "inputs": { "image": "HORIZON_INPUT_IMAGE" } },
+  "2": { "class_type": "LoadImage", "inputs": { "image": "HORIZON_MASK_IMAGE" } },
+  "3": { "class_type": "VAEEncodeForInpaint", "inputs": { "pixels": ["1", 0], "mask": ["2", 0], "vae": ["5", 2], "grow_mask_by": 6 } },
+  "4": { "class_type": "KSampler", "inputs": { "seed": 0, "steps": 30, "cfg": 7.5, "sampler_name": "euler_ancestral", "scheduler": "karras", "denoise": 0.75, "model": ["5", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["3", 0] } },
+  "5": { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": "ponyDiffusionV6XL_v6.safetensors" } },
+  "6": { "class_type": "CLIPTextEncode", "inputs": { "text": "masterpiece", "clip": ["5", 1] } },
+  "7": { "class_type": "CLIPTextEncode", "inputs": { "text": "nsfw", "clip": ["5", 1] } },
+  "8": { "class_type": "VAEDecode", "inputs": { "samples": ["4", 0], "vae": ["5", 2] } },
+  "9": { "class_type": "SaveImage", "inputs": { "images": ["8", 0], "filename_prefix": "horizon_inpaint" } }
+}

@@ -2,96 +2,196 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::sync::{Arc, Mutex};
 use once_cell::sync::Lazy;
+use std::collections::HashMap;
+use turbovec::IdMapIndex;
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct Entry {
+pub struct ChunkMeta {
     pub path: String,
     pub chunk: String,
-    pub vector: Vec<f32>,
+    pub created_at: i64,        // Unix timestamp
+    pub last_accessed: i64,     // Updated on each retrieval
+    pub access_count: u32,      // Incremented on each retrieval
+    #[serde(default)]
+    pub pinned: bool,           // Parsed from frontmatter
 }
 
-static INDEX_CACHE: Lazy<Mutex<Option<Arc<Vec<Entry>>>>> = Lazy::new(|| Mutex::new(None));
+pub struct VaultIndex {
+    pub inner: IdMapIndex,
+    pub metadata: std::sync::RwLock<HashMap<u64, ChunkMeta>>,
+    pub next_id: u64,
+}
 
-pub fn chunk_text(text: &str, size: usize, overlap: usize) -> Vec<String> {
-    let mut chunks = Vec::new();
-    let words: Vec<&str> = text.split_whitespace().collect();
-    let mut i = 0;
-    while i < words.len() {
-        let end = (i + size).min(words.len());
-        chunks.push(words[i..end].join(" "));
-        if end == words.len() { break; }
-        i += size - overlap;
+pub struct SearchResult {
+    pub path: String,
+    pub chunk: String,
+    pub score: f32,
+    pub id: u64,
+}
+
+static INDEX_CACHE: Lazy<Mutex<Option<Arc<VaultIndex>>>> = Lazy::new(|| Mutex::new(None));
+
+
+
+impl VaultIndex {
+    pub fn new() -> Self {
+        Self {
+            inner: IdMapIndex::new(768, 4).unwrap(), // Nomic is 768 dim, 4-bit quantization
+            metadata: std::sync::RwLock::new(HashMap::new()),
+            next_id: 1,
+        }
     }
-    chunks
-}
 
-pub fn search<'a>(index: &'a [Entry], query: &[f32], k: usize) -> Vec<&'a Entry> {
-    let ma: f32 = query.iter().map(|x| x * x).sum::<f32>().sqrt();
+    pub fn is_empty(&self) -> bool {
+        self.metadata.read().unwrap().is_empty()
+    }
+
+    pub fn add(&mut self, vector: &[f32], meta: ChunkMeta) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.inner.add_with_ids(vector, &[id]).unwrap();
+        self.metadata.write().unwrap().insert(id, meta);
+        id
+    }
+
+    pub fn remove(&mut self, id: u64) {
+        self.inner.remove(id);
+        self.metadata.write().unwrap().remove(&id);
+    }
+
+    pub fn remove_by_path(&mut self, path: &str) {
+        let mut to_remove = Vec::new();
+        for (&id, meta) in self.metadata.read().unwrap().iter() {
+            if meta.path == path {
+                to_remove.push(id);
+            }
+        }
+        for id in to_remove {
+            self.remove(id);
+        }
+    }
+
+    pub fn search(&self, query: &[f32], k: usize) -> Vec<SearchResult> {
+        let (scores, ids) = self.inner.search(query, k);
+        let mut results = Vec::new();
+        for i in 0..ids.len() {
+            if let Some(meta) = self.metadata.read().unwrap().get(&ids[i]) {
+                results.push(SearchResult {
+                    path: meta.path.clone(),
+                    chunk: meta.chunk.clone(),
+                    score: scores[i],
+                    id: ids[i],
+                });
+            }
+        }
+        results
+    }
     
-    let mut scored: Vec<(f32, &Entry)> = index.iter()
-        .map(|e| (cosine_similarity_precalc(query, &e.vector, ma), e))
-        .collect();
-    scored.sort_by(|a, b| b.0.total_cmp(&a.0));
-    scored.into_iter().take(k).map(|(_, e)| e).collect()
+    pub fn save(&self, path: &str) -> Result<(), String> {
+        if let Some(parent) = std::path::Path::new(path).parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        self.inner.write(path).map_err(|e| e.to_string())?;
+        
+        let meta_path = format!("{}.meta.json", path);
+        let serialized_meta = serde_json::to_string(&*self.metadata.read().unwrap()).map_err(|e| e.to_string())?;
+        fs::write(&meta_path, serialized_meta).map_err(|e| e.to_string())?;
+        
+        let next_id_path = format!("{}.nextid", path);
+        let _ = fs::write(&next_id_path, self.next_id.to_string());
+        
+        Ok(())
+    }
+    
+    pub fn load(path: &str) -> Result<Self, String> {
+        let inner = IdMapIndex::load(path).map_err(|e| e.to_string())?;
+        
+        let meta_path = format!("{}.meta.json", path);
+        let metadata_str = fs::read_to_string(&meta_path).map_err(|e| e.to_string())?;
+        let metadata: HashMap<u64, ChunkMeta> = serde_json::from_str(&metadata_str).map_err(|e| e.to_string())?;
+        
+        let next_id_path = format!("{}.nextid", path);
+        let next_id = fs::read_to_string(&next_id_path)
+            .unwrap_or_else(|_| "1".to_string())
+            .trim()
+            .parse::<u64>()
+            .unwrap_or(1);
+            
+        Ok(Self { inner, metadata: std::sync::RwLock::new(metadata), next_id })
+    }
 }
 
-fn cosine_similarity_precalc(a: &[f32], b: &[f32], ma: f32) -> f32 {
-    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let mb: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if ma == 0.0 || mb == 0.0 { 0.0 } else { dot / (ma * mb) }
-}
-
-pub fn save_index(index: &[Entry], path: &str) {
-    if let Some(parent) = std::path::Path::new(path).parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    if let Ok(data) = bincode::serialize(index) {
-        let _ = fs::write(path, data);
-    }
-    // Update cache
+pub fn save_index(index: VaultIndex, path: &str) {
+    let _ = index.save(path);
     if let Ok(mut cache) = INDEX_CACHE.lock() {
-        *cache = Some(Arc::new(index.to_vec()));
+        *cache = Some(Arc::new(index));
     }
 }
 
-pub fn load_index(path: &str) -> Arc<Vec<Entry>> {
+pub fn load_index(path: &str) -> Arc<VaultIndex> {
     if let Ok(mut cache) = INDEX_CACHE.lock() {
         if let Some(idx) = cache.as_ref() {
             return idx.clone();
         }
         
         // Cache miss, load from disk
-        if let Ok(data) = fs::read(path) {
-            if let Ok(index) = bincode::deserialize::<Vec<Entry>>(&data) {
-                let arc_index = Arc::new(index);
-                *cache = Some(arc_index.clone());
-                return arc_index;
-            }
+        if let Ok(index) = VaultIndex::load(path) {
+            let arc_index = Arc::new(index);
+            *cache = Some(arc_index.clone());
+            return arc_index;
         }
         
-        let empty_idx = Arc::new(vec![]);
+        // If it failed to load, check if it's the old .bin file, if so we should trigger a migration
+        // Or if it just doesn't exist, return empty index
+        let empty_idx = Arc::new(VaultIndex::new());
         *cache = Some(empty_idx.clone());
         return empty_idx;
     }
-    Arc::new(vec![])
+    Arc::new(VaultIndex::new())
 }
 
 #[tauri::command]
 pub async fn reindex() -> Result<usize, String> {
     let s = crate::settings::load();
     let notes = crate::vault::list_vault_notes(&s.vault_path);
-    let mut all_entries: Vec<Entry> = Vec::new();
+    let mut new_index = VaultIndex::new();
+
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
 
     for rel_path in &notes {
         let Ok(content) = crate::vault::read_vault_note(&s.vault_path, rel_path) else { continue };
-        let chunks = chunk_text(&content, 400, 50);
+        let pinned = content.starts_with("---\n") && content.contains("pinned: true");
+        let chunks: Vec<String> = content
+            .split("\n\n")
+            .filter(|c| !c.trim().is_empty())
+            .map(|c| c.to_string())
+            .collect();
         if chunks.is_empty() { continue; }
         let vectors = crate::ollama::embed(chunks.clone(), "nomic-embed-text:latest").await?;
         for (chunk, vector) in chunks.into_iter().zip(vectors) {
-            all_entries.push(Entry { path: rel_path.clone(), chunk, vector });
+            new_index.add(&vector, ChunkMeta {
+                path: rel_path.clone(),
+                chunk,
+                created_at: now,
+                last_accessed: now,
+                access_count: 0,
+                pinned,
+            });
         }
     }
 
-    save_index(&all_entries, &s.embeddings_path);
-    Ok(all_entries.len())
+    save_index(new_index, &s.embeddings_path);
+    
+    // Also try to delete old .bin if it exists
+    if s.embeddings_path.ends_with(".tv") {
+        let bin_path = s.embeddings_path.replace(".tv", ".bin");
+        if std::path::Path::new(&bin_path).exists() {
+            let _ = fs::remove_file(bin_path);
+        }
+    }
+    
+    // update cache
+    let idx = load_index(&s.embeddings_path);
+    let len = idx.metadata.read().unwrap().len();
+    Ok(len)
 }

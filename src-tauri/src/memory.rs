@@ -37,7 +37,52 @@ pub async fn get_context(query: &str) -> String {
     if !index.is_empty() {
         if let Ok(vecs) = ollama::embed(vec![query.to_string()], "nomic-embed-text:latest").await {
             if let Some(qvec) = vecs.into_iter().next() {
-                let results = embeddings::search(&index, &qvec, TOP_K);
+                let fetch_k = if s.memory_decay.enabled { TOP_K * 3 } else { TOP_K };
+                let mut results = index.search(&qvec, fetch_k);
+                
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+
+                if s.memory_decay.enabled {
+                    let hl = s.memory_decay.half_life_days;
+                    let boost_factor = s.memory_decay.access_boost_factor;
+                    let threshold = s.memory_decay.min_score_threshold;
+                    
+                    let meta_lock = index.metadata.read().unwrap();
+                    results.retain_mut(|res| {
+                        if let Some(meta) = meta_lock.get(&res.id) {
+                            let mut decay_factor = 1.0;
+                            if !meta.pinned {
+                                let days = (now - meta.last_accessed) as f64 / 86400.0;
+                                let days = days.max(0.0);
+                                decay_factor = 0.5f64.powf(days / hl);
+                            }
+                            let access_boost = 1.0 + (1.0 + meta.access_count as f64).log2() * boost_factor;
+                            res.score = (res.score as f64 * decay_factor * access_boost) as f32;
+                            res.score >= threshold as f32
+                        } else {
+                            false
+                        }
+                    });
+                    drop(meta_lock);
+                    
+                    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+                    results.truncate(TOP_K);
+                    
+                    let mut meta_write = index.metadata.write().unwrap();
+                    for res in &results {
+                        if let Some(meta) = meta_write.get_mut(&res.id) {
+                            meta.last_accessed = now;
+                            meta.access_count += 1;
+                        }
+                    }
+                    drop(meta_write);
+                    
+                    let path = s.embeddings_path.clone();
+                    let index_clone = index.clone();
+                    tokio::spawn(async move {
+                        let _ = index_clone.save(&path);
+                    });
+                }
 
                 for entry in results {
                     if current_len >= MAX_CONTEXT_CHARS { break; }
@@ -754,7 +799,7 @@ fn forge_log(app: &tauri::AppHandle, msg: &str) {
     }));
 }
 
-pub async fn propose_new_hubs(app: &tauri::AppHandle) {
+pub async fn propose_new_hubs(app: &tauri::AppHandle, force: bool) -> Result<String, String> {
     let s = settings::load();
     let known = all_hub_names();
 
@@ -779,21 +824,37 @@ pub async fn propose_new_hubs(app: &tauri::AppHandle) {
 
     if uncategorized.len() < 3 {
         forge_log(app, "Topic scan: no new hub needed");
-        return;
+        return Err("Not enough uncategorized notes (need at least 3).".into());
     }
 
     let vram_permit = {
         use tauri::Manager;
         let q = app.state::<crate::vram_queue::VramQueue>();
-        q.try_acquire("forge-hub-propose")
+        if force {
+            Some(q.acquire("forge-hub-propose").await.map_err(|e| e.to_string())?)
+        } else {
+            q.try_acquire("forge-hub-propose")
+        }
     };
     if vram_permit.is_none() {
         forge_log(app, "Topic scan: deferred — chat is active");
-        return;
+        return Err("LLM is currently busy with another task.".into());
     }
     forge_log(app, &format!("Topic scan: analysing {} uncategorized notes…", uncategorized.len()));
 
-    let sample: String = uncategorized.iter().take(6)
+    // Shuffle before sampling so the LLM sees a diverse cross-section each run,
+    // not always the same alphabetically-first notes (e.g. rally-heavy batches).
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos() as usize;
+    let mut shuffled = uncategorized.clone();
+    for i in (1..shuffled.len()).rev() {
+        let j = (seed.wrapping_mul(i + 1).wrapping_add(i * 6364136223846793005)) % (i + 1);
+        shuffled.swap(i, j);
+    }
+
+    let sample: String = shuffled.iter().take(12)
         .map(|(path, content)| {
             let preview: String = content.lines()
                 .filter(|l| !l.trim().is_empty() && !l.starts_with("Topics:"))
@@ -806,15 +867,16 @@ pub async fn propose_new_hubs(app: &tauri::AppHandle) {
     let prompt = format!(
         "These vault notes are uncategorized (tagged [[notes]]). \
 Identify ONE clear topic cluster among them and suggest a new hub.\n\
+CRITICAL INSTRUCTION: Do NOT propose hubs related to automotive, racing, or rallye. Find a DIFFERENT topic cluster that exists in these notes.\n\
 Notes:\n{}\n\n\
 Respond with ONLY valid JSON: {{\"name\": \"topic_name\", \"description\": \"one sentence\", \"keywords\": [\"kw1\", \"kw2\", ...]}}",
         sample
     );
 
-    let Ok(resp) = ollama::chat_once(
+    let resp = ollama::chat_once(
         vec![serde_json::json!({"role": "user", "content": prompt})],
         &s.agents.light_model,
-    ).await else { return; };
+    ).await.map_err(|e| format!("LLM Error: {}", e))?;
 
     drop(vram_permit);
 
@@ -825,19 +887,22 @@ Respond with ONLY valid JSON: {{\"name\": \"topic_name\", \"description\": \"one
         &r[s..e]
     };
 
-    let Ok(proposal) = serde_json::from_str::<serde_json::Value>(json_str) else { return; };
-    let (Some(name), Some(desc)) = (proposal["name"].as_str(), proposal["description"].as_str()) else { return; };
+    let proposal: serde_json::Value = serde_json::from_str(json_str)
+        .map_err(|e| format!("LLM output was not valid JSON: {}", e))?;
+    let (Some(name), Some(desc)) = (proposal["name"].as_str(), proposal["description"].as_str()) else { 
+        return Err("JSON missing 'name' or 'description'".into()); 
+    };
     let keywords: Vec<String> = proposal["keywords"].as_array()
         .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
         .unwrap_or_default();
 
     if name.is_empty() || keywords.len() < 2 {
         forge_log(app, "Topic scan: LLM response unusable");
-        return;
+        return Err("LLM response unusable: empty name or too few keywords.".into());
     }
     if known.iter().any(|k| k == name) {
         forge_log(app, &format!("Topic scan: [[{}]] already exists", name));
-        return;
+        return Err(format!("Hub [[{}]] already exists.", name));
     }
 
     forge_log(app, &format!("Topic scan: proposing new hub [[{}]]", name));
@@ -847,6 +912,7 @@ Respond with ONLY valid JSON: {{\"name\": \"topic_name\", \"description\": \"one
         "keywords": keywords,
         "uncategorized_count": uncategorized.len()
     }));
+    Ok("Hub analysis complete — check for a proposal banner.".into())
 }
 
 #[tauri::command]
@@ -924,8 +990,7 @@ pub fn vault_topic_status() -> serde_json::Value {
 
 #[tauri::command]
 pub async fn trigger_hub_proposal(app: tauri::AppHandle) -> Result<String, String> {
-    propose_new_hubs(&app).await;
-    Ok("Hub analysis complete — check for a proposal banner.".to_string())
+    propose_new_hubs(&app, true).await
 }
 
 pub async fn consolidate_vault_inner() -> Result<String, String> {

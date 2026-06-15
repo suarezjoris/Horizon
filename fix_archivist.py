@@ -1,39 +1,8 @@
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::time::{Duration, Instant};
-use notify::{Watcher, RecursiveMode, EventKind};
-use tauri::{AppHandle, Emitter};
-use crate::{embeddings, settings, ollama, vault};
+import re
 
-pub fn categorize_file(filename: &str) -> Option<&'static str> {
-    let ext = std::path::Path::new(filename)
-        .extension()?
-        .to_string_lossy()
-        .to_lowercase();
-    let ext = ext.as_str();
+content = open("src-tauri/src/archivist.rs").read()
 
-    match ext {
-        "pdf" | "docx" | "pptx" | "xlsx" | "odt" => Some("documents"),
-        "jpg" | "jpeg" | "png" | "gif" | "webp" | "svg" => Some("images"),
-        "mp4" | "mkv" | "avi" | "webm" | "mov" => Some("videos"),
-        "mp3" | "flac" | "wav" | "ogg" => Some("audio"),
-        "md" | "txt" | "rst" => Some("notes"),
-        "zip" | "tar" | "gz" | "7z" | "rar" => Some("archives"),
-        "rs" | "py" | "js" | "ts" | "go" | "c" | "cpp" | "java" => Some("code"),
-        _ => None,
-    }
-}
-
-fn emit_status(app: &AppHandle, status: &str, msg: &str) {
-    let _ = app.emit("armata-agent-status", serde_json::json!({
-        "agent": "archivist",
-        "status": status,
-        "message": msg
-    }));
-}
-
-pub async fn run_archivist(app: AppHandle, running: Arc<AtomicBool>) {
+new_run = """pub async fn run_archivist(app: AppHandle, running: Arc<AtomicBool>) {
     let s = settings::load();
     let home = match dirs::home_dir() {
         Some(h) => h,
@@ -110,7 +79,7 @@ pub async fn run_archivist(app: AppHandle, running: Arc<AtomicBool>) {
 
         if !ready_vault.is_empty() {
             let s = settings::load();
-            let mut index = embeddings::VaultIndex::load(&s.embeddings_path).unwrap_or_else(|_| embeddings::VaultIndex::new());
+            let mut index = (*embeddings::load_index(&s.embeddings_path)).clone();
             let mut changed = false;
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
             
@@ -126,13 +95,8 @@ pub async fn run_archivist(app: AppHandle, running: Arc<AtomicBool>) {
                 changed = true;
                 
                 if let Ok(content) = std::fs::read_to_string(&path) {
-                    let pinned = content.starts_with("---
-") && content.contains("pinned: true");
-                    let chunks: Vec<String> = content
-                        .split("\n\n")
-                        .filter(|c| !c.trim().is_empty())
-                        .map(|c| c.to_string())
-                        .collect();
+                    let pinned = content.starts_with("---\\n") && content.contains("pinned: true");
+                    let chunks = embeddings::chunk_text(&content, 400, 50);
                     if chunks.is_empty() { continue; }
                     
                     if let Ok(vectors) = crate::ollama::embed(chunks.clone(), "nomic-embed-text:latest").await {
@@ -158,58 +122,7 @@ pub async fn run_archivist(app: AppHandle, running: Arc<AtomicBool>) {
 
     emit_status(&app, "offline", "Archivist stopped");
 }
+"""
 
-
-
-fn handle_new_file(app: &AppHandle, path: &PathBuf, vault_dir: &PathBuf) {
-    if !path.is_file() { return; }
-
-    let filename = match path.file_name() {
-        Some(n) => n.to_string_lossy().into_owned(),
-        None => return,
-    };
-
-    let category = match categorize_file(&filename) {
-        Some(c) => c,
-        None => return,
-    };
-
-    let category_dir = vault_dir.join(category);
-    let _ = std::fs::create_dir_all(&category_dir);
-
-    let dest = category_dir.join(&filename);
-    if dest.exists() { return; }
-
-    // Try atomic rename first; fall back to copy+delete for cross-device moves
-    let result = std::fs::rename(path, &dest).or_else(|_| {
-        std::fs::copy(path, &dest).and_then(|_| std::fs::remove_file(path))
-    });
-
-    match result {
-        Ok(_) => emit_status(app, "online", &format!("Filed: {} → {}/", filename, category)),
-        Err(e) => emit_status(app, "warn", &format!("Failed to move {}: {}", filename, e)),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_categorize_known_extensions() {
-        assert_eq!(categorize_file("report.pdf"), Some("documents"));
-        assert_eq!(categorize_file("photo.jpg"), Some("images"));
-        assert_eq!(categorize_file("photo.jpeg"), Some("images"));
-        assert_eq!(categorize_file("photo.PNG"), Some("images"));
-        assert_eq!(categorize_file("notes.md"), Some("notes"));
-        assert_eq!(categorize_file("notes.txt"), Some("notes"));
-        assert_eq!(categorize_file("archive.zip"), Some("archives"));
-        assert_eq!(categorize_file("code.rs"), Some("code"));
-    }
-
-    #[test]
-    fn test_categorize_unknown_extension_returns_none() {
-        assert_eq!(categorize_file("binary.exe"), None);
-        assert_eq!(categorize_file("noextension"), None);
-    }
-}
+content = re.sub(r"pub async fn run_archivist.*?emit_status\(&app, \"offline\", \"Archivist stopped\"\);\n}", new_run, content, flags=re.DOTALL)
+open("src-tauri/src/archivist.rs", "w").write(content)

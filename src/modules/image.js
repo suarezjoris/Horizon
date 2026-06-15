@@ -31,6 +31,10 @@ function buildContextMenu() {
     useBaseItem.className = 'ctx-item';
     useBaseItem.id = 'ctx-use-base';
     useBaseItem.textContent = '✏️ Use as base (img2img)';
+    const inpaintItem = document.createElement('div');
+    inpaintItem.className = 'ctx-item';
+    inpaintItem.id = 'ctx-inpaint';
+    inpaintItem.textContent = '🎨 Inpaint (draw mask)';
     const copyImgItem = document.createElement('div');
     copyImgItem.className = 'ctx-item';
     copyImgItem.id = 'ctx-copy-img';
@@ -44,6 +48,7 @@ function buildContextMenu() {
     copyItem.id = 'ctx-copy-path';
     copyItem.textContent = '📋 Copy file path';
     menu.appendChild(useBaseItem);
+    menu.appendChild(inpaintItem);
     menu.appendChild(copyImgItem);
     menu.appendChild(saveItem);
     menu.appendChild(copyItem);
@@ -66,6 +71,14 @@ function showContextMenu(e, realPath) {
         setI2ISource(realPath);
         i2iEnabled.checked = true;
         i2iControls.classList.add('active');
+    };
+    ctxMenu.querySelector('#ctx-inpaint').onclick = () => {
+        ctxMenu.style.display = 'none';
+        if (window.openInpaintEditor) {
+            window.openInpaintEditor(realPath);
+        } else {
+            console.error("Inpaint editor not loaded");
+        }
     };
     ctxMenu.querySelector('#ctx-copy-img').onclick = async () => {
         ctxMenu.style.display = 'none';
@@ -132,16 +145,19 @@ i2iStrength.addEventListener('input', () => {
     i2iStrengthVal.textContent = i2iStrength.value + '%';
 });
 
-function setI2ISource(path) {
+window.setI2ISource = function(path) {
     i2iSourcePath = path;
     const name = path.split('/').pop();
     i2iName.textContent = name;
     const tauri = getTauri();
     const url = (tauri && tauri.core && tauri.core.convertFileSrc)
-        ? tauri.core.convertFileSrc(path) : path;
+        ? tauri.core.convertFileSrc(path)
+        : `file://${path}`;
     i2iThumb.src = url;
     i2iThumb.classList.add('active');
-}
+    i2iEnabled.checked = true;
+    i2iControls.classList.add('active');
+};
 
 document.getElementById('i2i-use-current').addEventListener('click', () => {
     if (lastGeneratedPath) {

@@ -87,6 +87,7 @@ pub async fn toggle_agent(app: AppHandle, agent: String, enabled: bool) -> Resul
         "antenna" => s.agents.antenna_enabled = enabled,
         "forge" => s.agents.forge_enabled = enabled,
         "wiki" => s.agents.wiki_enabled = enabled,
+
         _ => return Err(format!("Unknown agent: {}", agent)),
     }
 
@@ -114,6 +115,7 @@ pub fn get_armata_status() -> serde_json::Value {
         "antenna_port": s.agents.antenna_port,
         "vanguard_interval": s.agents.vanguard_interval_minutes,
         "light_model": s.agents.light_model,
+
     })
 }
 

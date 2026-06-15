@@ -168,7 +168,7 @@ pub async fn bash(workspace: &Path, command: &str) -> Result<String, String> {
     }
 }
 
-pub fn build_tool_definitions(include_bash: bool) -> Vec<serde_json::Value> {
+pub fn build_tool_definitions(include_bash: bool, plugins: &crate::plugins::PluginRegistry) -> Vec<serde_json::Value> {
     let mut tools = vec![
         serde_json::json!({
             "type": "function",
@@ -283,7 +283,8 @@ pub fn build_tool_definitions(include_bash: bool) -> Vec<serde_json::Value> {
                     "properties": {
                         "filename": { "type": "string" },
                         "title":    { "type": "string" },
-                        "elements": { "type": "array", "items": { "type": "object" } }
+                        "elements": { "type": "array", "items": { "type": "object" } },
+                        "template": { "type": "string", "description": "Optional name of the template to use (e.g. professional)" }
                     },
                     "required": ["filename", "title", "elements"]
                 }
@@ -299,7 +300,8 @@ pub fn build_tool_definitions(include_bash: bool) -> Vec<serde_json::Value> {
                     "properties": {
                         "filename": { "type": "string" },
                         "title":    { "type": "string" },
-                        "slides":   { "type": "array", "items": { "type": "object" } }
+                        "slides":   { "type": "array", "items": { "type": "object" } },
+                        "template": { "type": "string", "description": "Optional name of the template to use (e.g. professional)" }
                     },
                     "required": ["filename", "title", "slides"]
                 }
@@ -323,6 +325,22 @@ pub fn build_tool_definitions(include_bash: bool) -> Vec<serde_json::Value> {
         serde_json::json!({
             "type": "function",
             "function": {
+                "name": "generate_pdf",
+                "description": "Generate a PDF document.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "filename": { "type": "string" },
+                        "title":    { "type": "string" },
+                        "elements": { "type": "array", "items": { "type": "object" } }
+                    },
+                    "required": ["filename", "title", "elements"]
+                }
+            }
+        }),
+        serde_json::json!({
+            "type": "function",
+            "function": {
                 "name": "generate_image",
                 "description": "Generate an image from a text prompt using ComfyUI.",
                 "parameters": {
@@ -331,6 +349,20 @@ pub fn build_tool_definitions(include_bash: bool) -> Vec<serde_json::Value> {
                         "prompt": { "type": "string" }
                     },
                     "required": ["prompt"]
+                }
+            }
+        }),
+        serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "convert_md_to_docx",
+                "description": "Convert a markdown file from the vault into a docx document.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "rel_path": { "type": "string", "description": "Relative path to the markdown file in the vault" }
+                    },
+                    "required": ["rel_path"]
                 }
             }
         }),
@@ -352,6 +384,7 @@ pub fn build_tool_definitions(include_bash: bool) -> Vec<serde_json::Value> {
             }
         }));
     }
+    tools.extend(plugins.tool_definitions());
     tools
 }
 
@@ -359,6 +392,7 @@ pub async fn execute(
     name: &str,
     args: &serde_json::Value,
     workspace: &Path,
+    plugins: &crate::plugins::PluginRegistry
 ) -> Result<String, String> {
     let get = |key: &str| -> Result<&str, String> {
         args[key].as_str().ok_or_else(|| format!("Missing argument: {}", key))
@@ -391,11 +425,19 @@ pub async fn execute(
                 .map_err(|e| format!("Invalid xlsx args: {}", e))?;
             crate::office::generate_xlsx(content).await
         }
+        "generate_pdf" => {
+            let content = serde_json::from_value(args.clone())
+                .map_err(|e| format!("Invalid pdf args: {}", e))?;
+            crate::office::generate_pdf(content).await
+        }
         "generate_image" => {
             let prompt = get("prompt")?;
             Ok(format!("GENERATE_IMAGE:{}", prompt))
         }
-        _ => Err(format!("Unknown tool: {}", name)),
+        "convert_md_to_docx" => {
+            crate::md_converter::export_note_as_docx(get("rel_path")?.to_string(), None).await
+        }
+        _ => plugins.execute_tool(name, args).await,
     }
 }
 
@@ -585,7 +627,8 @@ mod tests {
 
     #[test]
     fn test_build_tool_definitions_excludes_bash_on_non_linux() {
-        let tools = build_tool_definitions(false);
+        let plugins = crate::plugins::PluginRegistry::new();
+        let tools = build_tool_definitions(false, &plugins);
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["function"]["name"].as_str())
             .collect();
@@ -600,7 +643,8 @@ mod tests {
 
     #[test]
     fn test_build_tool_definitions_includes_bash_on_linux() {
-        let tools = build_tool_definitions(true);
+        let plugins = crate::plugins::PluginRegistry::new();
+        let tools = build_tool_definitions(true, &plugins);
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["function"]["name"].as_str())
             .collect();
@@ -609,7 +653,8 @@ mod tests {
 
     #[test]
     fn test_tool_definitions_have_required_fields() {
-        let tools = build_tool_definitions(false);
+        let plugins = crate::plugins::PluginRegistry::new();
+        let tools = build_tool_definitions(false, &plugins);
         for tool in &tools {
             assert!(tool["type"].as_str().is_some(), "missing type");
             assert!(tool["function"]["name"].as_str().is_some(), "missing name");

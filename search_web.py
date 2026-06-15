@@ -8,14 +8,31 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"}
 MAX_PAGE_CHARS = 3000
 FETCH_TIMEOUT = 6
 
+# Domains that usually block simple requests or require JS
+BAD_DOMAINS = ["youtube.com", "reddit.com", "twitter.com", "x.com", "instagram.com", "facebook.com", "tiktok.com", "socialblade.com"]
+
 def fetch_page(url):
     try:
+        if any(domain in url.lower() for domain in BAD_DOMAINS):
+            return None
+            
         r = requests.get(url, timeout=FETCH_TIMEOUT, headers=HEADERS)
         r.raise_for_status()
         doc = Document(r.text)
         text = doc.summary(html_partial=True)
         text = re.sub(r'<[^>]+>', ' ', text)
         text = re.sub(r'\s+', ' ', text).strip()
+        
+        # Check for generic blocking pages
+        ignore_phrases = [
+            'enable javascript', 'javascript is disabled',
+            'nous utilisons des cookies', 'accept cookies',
+            'accepter les cookies', 'captcha', 'security check',
+            'are you a human'
+        ]
+        if any(p in text.lower() for p in ignore_phrases):
+            return None
+            
         return text[:MAX_PAGE_CHARS] if len(text) > 100 else None
     except Exception:
         return None
@@ -33,7 +50,10 @@ def search(query):
             snippet = res.get('body', '')
 
             content = fetch_page(url) if url else None
-            body = content if content else snippet
+            
+            body = f"Snippet: {snippet}"
+            if content:
+                body += f"\nPage Content: {content}"
 
             source = f"[{title}]({url})" if url else title
             output.append(f"{i+1}. {source}\n{body}")

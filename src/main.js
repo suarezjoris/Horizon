@@ -45,6 +45,15 @@ document.getElementById('settings-btn').addEventListener('click', async () => {
   document.getElementById('s-rp').value = currentSettings.roleplay_model;
   document.getElementById('s-comfy').value = currentSettings.comfyui_path;
   document.getElementById('s-rating').value = currentSettings.image_rating || 'rating_safe';
+  
+
+  
+  if (currentSettings.memory_decay) {
+    document.getElementById('s-decay-enabled').checked = currentSettings.memory_decay.enabled;
+    document.getElementById('s-decay-hl').value = currentSettings.memory_decay.half_life_days || 30.0;
+    document.getElementById('s-decay-boost').value = currentSettings.memory_decay.access_boost_factor || 0.1;
+    document.getElementById('s-decay-min').value = currentSettings.memory_decay.min_score_threshold || 0.05;
+  }
 });
 
 document.getElementById('settings-overlay').addEventListener('click', e => {
@@ -58,13 +67,22 @@ document.getElementById('settings-save').addEventListener('click', async () => {
     llm_model: document.getElementById('s-llm').value,
     roleplay_model: document.getElementById('s-rp').value,
     comfyui_path: document.getElementById('s-comfy').value,
-    image_rating: document.getElementById('s-rating').value
+    image_rating: document.getElementById('s-rating').value,
+
+    memory_decay: {
+      enabled: document.getElementById('s-decay-enabled').checked,
+      half_life_days: parseFloat(document.getElementById('s-decay-hl').value) || 30.0,
+      access_boost_factor: parseFloat(document.getElementById('s-decay-boost').value) || 0.1,
+      min_score_threshold: parseFloat(document.getElementById('s-decay-min').value) || 0.05,
+    }
   };
 
   await window.__TAURI__.core.invoke('save_settings', { settings });
   currentSettings = settings;
   document.getElementById('settings-overlay').classList.remove('open');
 });
+
+
 
 // Help / Cheatsheet Modal Logic
 document.getElementById('help-btn').addEventListener('click', () => {
@@ -119,3 +137,49 @@ document.querySelectorAll('.tab[data-tab]').forEach(tab => {
 });
 
 window.switchTab = switchTab;
+
+// Plugin System
+(async () => {
+    try {
+        const { invoke } = window.__TAURI__.core;
+        const plugins = await invoke('list_ui_plugins');
+        
+        // Find containers
+        const tabContainer = document.querySelector('.sidebar') || document.querySelector('.tabs');
+        const panelsContainer = document.querySelector('.main-content') || document.querySelector('.panels-container');
+        
+        if (!tabContainer || !panelsContainer) {
+            console.warn("Could not find tab or panel containers for plugins");
+            return;
+        }
+        
+        for (const plugin of plugins) {
+            // Create tab button
+            const tab = document.createElement('div');
+            tab.className = 'tab';
+            tab.dataset.tab = `plugin-${plugin.name}`;
+            tab.innerHTML = `<span>${plugin.icon || '🧩'} ${plugin.label}</span>`;
+            tab.addEventListener('click', () => {
+                if (!tab.classList.contains('disabled')) switchTab(tab.dataset.tab);
+            });
+            
+            // Create panel
+            const panel = document.createElement('div');
+            panel.id = `panel-plugin-${plugin.name}`;
+            panel.className = 'panel hidden';
+            
+            // Load plugin HTML
+            try {
+                const html = await invoke('get_plugin_html', { pluginName: plugin.name });
+                panel.innerHTML = html;
+            } catch (e) {
+                panel.innerHTML = `<div style="padding: 20px; color: red;">Failed to load plugin UI: ${e}</div>`;
+            }
+            
+            tabContainer.appendChild(tab);
+            panelsContainer.appendChild(panel);
+        }
+    } catch (e) {
+        console.error("Failed to load plugins:", e);
+    }
+})();

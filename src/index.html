@@ -94,14 +94,7 @@
   </div>
 </div>
 
-<div id="pax-banner" style="display:none; position:fixed; bottom:80px; left:20px; z-index:9999; background:var(--bg-card,#1e1e2e); border:1px solid rgba(180,140,255,0.4); border-radius:14px; padding:16px 20px; max-width:340px; box-shadow:0 8px 32px rgba(0,0,0,0.5);">
-  <div style="font-size:12px; color:rgba(180,140,255,0.9); font-weight:700; margin-bottom:6px;">◈ PAX</div>
-  <div id="pax-banner-question" style="font-size:13px; color:rgba(255,255,255,0.85); margin-bottom:12px; line-height:1.5;"></div>
-  <div style="display:flex; gap:8px;">
-    <button id="pax-banner-open" style="flex:1; background:rgba(180,140,255,0.2); color:#fff; border:1px solid rgba(180,140,255,0.4); padding:8px; border-radius:8px; font-weight:700; cursor:pointer;">Ouvrir le chat</button>
-    <button id="pax-banner-dismiss" style="flex:0; background:transparent; color:rgba(255,255,255,0.4); border:none; padding:8px 10px; cursor:pointer; font-size:16px;">✕</button>
-  </div>
-</div>
+
 
 <div id="panels">
   <!-- LLM Panel -->
@@ -127,6 +120,7 @@
         <select id="persona-select" title="Switch Persona">
           <option value="default">🎭 Horizon</option>
         </select>
+        <button id="export-pdf-btn" style="background:var(--accent-gold); color:#000; border:none; padding:4px 8px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:bold; margin-right:8px;">📄 PDF</button>
         <button id="send-btn">Send</button>
       </div>
     </div>
@@ -266,8 +260,12 @@
       </div>
       <div id="notes-editor-area">
         <div id="notes-editor-header">
+           <div id="note-decay-stats" style="font-size: 11px; color: rgba(255,255,255,0.5); margin-bottom: 8px;"></div>
            <input type="text" id="note-title" placeholder="Note Title...">
-           <button id="toggle-mindmap-btn">Toggle Neural Field</button>
+           <div style="display:flex; gap: 8px;">
+             <button id="export-docx-btn" style="background: rgba(46,116,181,0.2); border: 1px solid rgba(46,116,181,0.5); color: #fff;">Export Docx</button>
+             <button id="toggle-mindmap-btn">Toggle Neural Field</button>
+           </div>
         </div>
         <div id="mindmap-container" class="hidden"></div>
         <textarea id="note-content" placeholder="Write your thoughts here..."></textarea>
@@ -334,16 +332,7 @@
           <div class="agent-log">IDLE</div>
         </div>
 
-        <div class="agent-card" id="agent-pax">
-          <div class="agent-header">
-            <span class="agent-icon">🔮</span>
-            <span class="agent-name">Pax</span>
-            <div class="agent-toggle agent-toggle--static active" title="RAG Curiosity Engine"><div class="toggle-btn"></div></div>
-          </div>
-          <div class="agent-status">Watching for knowledge gaps…</div>
-          <div class="agent-log log-online">ONLINE</div>
-          <button id="trigger-pax" style="margin-top:6px;font-size:11px;padding:3px 8px;cursor:pointer;">Test now</button>
-        </div>
+
 
       </div>
 
@@ -418,7 +407,27 @@
       </select>
     </div>
 
-    <div id="persona-crafter">
+    <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+      <h4 style="color: var(--accent-gold); margin-bottom: 10px;">🧠 Memory Decay / Scoring</h4>
+      <div class="setting-row">
+        <label>Enable Decay</label>
+        <input id="s-decay-enabled" type="checkbox">
+      </div>
+      <div class="setting-row">
+        <label>Half-life (Days)</label>
+        <input id="s-decay-hl" type="number" step="1" min="1">
+      </div>
+      <div class="setting-row">
+        <label>Access Boost</label>
+        <input id="s-decay-boost" type="number" step="0.05" min="0">
+      </div>
+      <div class="setting-row">
+        <label>Min Score</label>
+        <input id="s-decay-min" type="number" step="0.01" min="0">
+      </div>
+    </div>
+
+    <div id="persona-crafter" style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
       <h4 style="color: var(--accent-gold); margin-bottom: 10px;">🎭 Persona Crafter</h4>
       <div class="setting-row">
         <label>Persona Name</label>
@@ -431,6 +440,8 @@
       <button id="pc-save-btn">Save Persona</button>
     </div>
 
+
+
     <div id="settings-footer">
        <button id="reset-mem-btn">Wipe Memory</button>
        <button id="settings-save">Save</button>
@@ -438,9 +449,42 @@
   </div>
 </div>
 
+<div id="inpaint-overlay" class="hidden">
+  <div id="inpaint-panel">
+    <div id="inpaint-header">
+      <h3>🎨 Inpainting Editor</h3>
+      <button id="inpaint-close-btn">✕</button>
+    </div>
+    <div id="inpaint-canvas-container">
+      <!-- Main image canvas -->
+      <canvas id="inpaint-canvas" style="position: absolute;"></canvas>
+      <!-- Red tint overlay mask -->
+      <canvas id="inpaint-mask-preview" style="position: absolute; opacity: 0.5; pointer-events: none;"></canvas>
+      <!-- Interactive mask drawing layer -->
+      <canvas id="inpaint-mask-interactive" style="position: absolute;"></canvas>
+    </div>
+    <div id="inpaint-controls">
+      <label>🖌 Brush Size</label>
+      <input type="range" id="inpaint-brush-size" min="5" max="150" value="40">
+      <span id="inpaint-brush-val" style="min-width: 35px;">40px</span>
+      
+      <button id="inpaint-mode-paint" class="active">🖌 Paint</button>
+      <button id="inpaint-mode-erase">⬜ Erase</button>
+      <button id="inpaint-clear-btn">🗑 Clear</button>
+    </div>
+    <div id="inpaint-prompt-area">
+      <textarea id="inpaint-prompt" rows="2" placeholder="What should be generated in the masked area?"></textarea>
+      <textarea id="inpaint-negative" rows="1" placeholder="Negative prompt (optional)"></textarea>
+    </div>
+    <button id="inpaint-submit-btn">🎨 Generate Inpainting</button>
+  </div>
+</div>
+
 <script src="libs/purify.min.js"></script>
 <script src="libs/marked.min.js"></script>
 <script src="modules/diagnostic.js"></script>
+<script src="modules/dropzone.js"></script>
+<script src="modules/inpaint.js"></script>
 <script src="modules/llm.js"></script>
 <script src="modules/image.js"></script>
 <script src="modules/cinema.js"></script>

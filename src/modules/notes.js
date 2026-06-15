@@ -7,6 +7,7 @@
     const saveBtn = document.getElementById('save-note-btn');
     const newNoteBtn = document.getElementById('new-note-btn');
     const toggleMindmapBtn = document.getElementById('toggle-mindmap-btn');
+    const exportDocxBtn = document.getElementById('export-docx-btn');
     const mindmapContainer = document.getElementById('mindmap-container');
 
     let currentNotePath = null;
@@ -35,6 +36,19 @@
             currentNotePath = path;
             noteTitle.value = path.replace('.md', '');
             noteContent.value = content;
+            
+            try {
+                const stats = await invoke('get_note_decay_stats', { relPath: path });
+                const statsEl = document.getElementById('note-decay-stats');
+                if (stats.status === "not_indexed") {
+                    statsEl.textContent = "Not indexed";
+                } else {
+                    statsEl.textContent = `Scoring: Decay ${stats.decay_factor}x | Boost ${stats.boost_factor}x | Total Mult ${stats.current_multiplier}x | Access: ${stats.total_access} | Days: ${stats.days_since_access} | ${stats.pinned ? '[PINNED]' : ''}`;
+                }
+            } catch (e) {
+                console.error("Failed to load decay stats", e);
+            }
+            
             refreshNotes();
         } catch (e) {
             alert("Error reading note: " + e);
@@ -70,6 +84,20 @@
         mindmapContainer.classList.toggle('hidden', !isMindmapVisible);
         noteContent.classList.toggle('hidden', isMindmapVisible);
         if (isMindmapVisible) renderMindmap();
+    };
+
+    exportDocxBtn.onclick = async () => {
+        if (!currentNotePath) return alert("Please select a note to export.");
+        const oldText = exportDocxBtn.textContent;
+        exportDocxBtn.textContent = "Exporting...";
+        try {
+            const path = await invoke('export_note_as_docx', { relPath: currentNotePath, template: null });
+            alert(`Exported successfully to:\n${path}`);
+        } catch (e) {
+            alert(`Error exporting to Docx:\n${e}`);
+        } finally {
+            exportDocxBtn.textContent = oldText;
+        }
     };
 
     async function renderMindmap() {

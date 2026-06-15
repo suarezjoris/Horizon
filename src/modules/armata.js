@@ -50,6 +50,85 @@
         log(event.payload, 'info');
     });
 
+    // --- Metrics from Rust ---
+    listen('system-metrics', (event) => {
+        const metrics = event.payload;
+        for (const [agent, data] of Object.entries(metrics)) {
+            updateAgentMetrics(agent, data);
+        }
+    });
+
+    const metricHistory = {};
+
+    function updateAgentMetrics(agent, data) {
+        const card = document.getElementById(`agent-${agent}`);
+        if (!card) return;
+
+        if (!metricHistory[agent]) {
+            metricHistory[agent] = { cpu: [], ram: [] };
+        }
+        
+        const hist = metricHistory[agent];
+        hist.cpu.push(data.cpu);
+        hist.ram.push(data.ram_mb);
+        if (hist.cpu.length > 20) hist.cpu.shift();
+        if (hist.ram.length > 20) hist.ram.shift();
+
+        let metricsContainer = card.querySelector('.agent-metrics');
+        if (!metricsContainer) {
+            metricsContainer = document.createElement('div');
+            metricsContainer.className = 'agent-metrics';
+            metricsContainer.innerHTML = `
+                <div class="metric">
+                    <div class="metric-info"><span class="metric-label">CPU</span> <span class="metric-val cpu-val">0%</span></div>
+                    <canvas class="sparkline cpu-spark" width="80" height="15"></canvas>
+                </div>
+                <div class="metric">
+                    <div class="metric-info"><span class="metric-label">RAM</span> <span class="metric-val ram-val">0M</span></div>
+                    <canvas class="sparkline ram-spark" width="80" height="15"></canvas>
+                </div>
+            `;
+            const logEl = card.querySelector('.agent-log');
+            if (logEl) {
+                card.insertBefore(metricsContainer, logEl);
+            } else {
+                card.appendChild(metricsContainer);
+            }
+        }
+
+        metricsContainer.querySelector('.cpu-val').textContent = `${data.cpu.toFixed(1)}%`;
+        metricsContainer.querySelector('.ram-val').textContent = `${data.ram_mb.toFixed(0)}M`;
+
+        drawSparkline(metricsContainer.querySelector('.cpu-spark'), hist.cpu, '#ff7b72', 100); // Max CPU 100%
+        drawSparkline(metricsContainer.querySelector('.ram-spark'), hist.ram, '#79c0ff', Math.max(...hist.ram, 500)); // Dynamic max
+    }
+
+    function drawSparkline(canvas, data, color, maxVal) {
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+        
+        if (data.length < 2) return;
+        
+        ctx.beginPath();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        
+        const step = w / (20 - 1);
+        
+        for (let i = 0; i < data.length; i++) {
+            const x = i * step;
+            // Prevent division by zero
+            const safeMax = maxVal > 0 ? maxVal : 1;
+            const y = h - (Math.min(data[i] / safeMax, 1.0) * h);
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+
     // --- Hub proposal from Forge ---
     let pendingProposal = null;
     const banner = document.getElementById('hub-proposal-banner');
@@ -111,6 +190,7 @@
             else if (status === 'online') logEl.classList.add('log-online');
         }
     }
+
 
     // --- Toggle buttons ---
     document.getElementById('toggle-forge')?.addEventListener('click', async () => {

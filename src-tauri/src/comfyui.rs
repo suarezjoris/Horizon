@@ -129,6 +129,37 @@ async fn upload_image_to_comfyui(client: &Client, path: &str) -> Result<String, 
         .ok_or_else(|| format!("ComfyUI upload returned no name: {}", body))
 }
 
+async fn upload_base64_to_comfyui(client: &Client, base64: &str, filename: &str) -> Result<String, String> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let b64_data = if let Some(idx) = base64.find(',') {
+        &base64[idx + 1..]
+    } else {
+        base64
+    };
+    let data = STANDARD.decode(b64_data).map_err(|e| format!("Invalid base64: {}", e))?;
+
+    let part = reqwest::multipart::Part::bytes(data)
+        .file_name(filename.to_string())
+        .mime_str("image/png")
+        .map_err(|e| e.to_string())?;
+    let form = reqwest::multipart::Form::new()
+        .part("image", part)
+        .text("type", "input")
+        .text("overwrite", "true");
+
+    let resp = client
+        .post("http://127.0.0.1:8188/upload/image")
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("Upload failed: {}", e))?;
+
+    let body: Value = resp.json().await.map_err(|e| e.to_string())?;
+    body["name"].as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| format!("ComfyUI upload returned no name: {}", body))
+}
+
 #[tauri::command]
 pub async fn generate_image(
     vram_queue: tauri::State<'_, crate::vram_queue::VramQueue>,
@@ -317,6 +348,183 @@ pub async fn generate_image(
         let bytes = img_resp.bytes().await.map_err(|e| e.to_string())?;
 
         let s = settings::load();
+        let comfyui_output = std::path::PathBuf::from(&s.comfyui_path)
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join("output");
+        let sub = if subfolder.is_empty() { comfyui_output.clone() } else { comfyui_output.join(&subfolder) };
+        let comfyui_path = sub.join(&filename).to_string_lossy().into_owned();
+
+        Ok(GenerateImageResult { bytes: bytes.to_vec(), comfyui_path })
+    } else {
+        Err(format!("ComfyUI rejected the prompt: {}", body))
+    }
+}
+
+#[tauri::command]
+pub async fn generate_inpainting(
+    vram_queue: tauri::State<'_, crate::vram_queue::VramQueue>,
+    image_path: String,
+    mask_base64: String,
+    prompt: String,
+    negative: Option<String>,
+) -> Result<GenerateImageResult, String> {
+    let _permit = vram_queue.acquire("ComfyUI Inpaint").await?;
+    let s = settings::load();
+
+    // 1. Unload Ollama
+    let _ = ollama::unload(&s.llm_model).await;
+
+    // 2. Load workflow template
+    let workflow_file = "comfyui-inpaint-workflow.json";
+
+    let current_dir = std::env::current_dir().unwrap_or_default();
+    let mut paths_to_try = vec![
+        current_dir.join(format!("assets/{}", workflow_file)),
+        current_dir.parent().map(|p| p.join(format!("assets/{}", workflow_file))).unwrap_or_default(),
+    ];
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            paths_to_try.push(exe_dir.join(format!("assets/{}", workflow_file)));
+            if let Some(parent) = exe_dir.parent() {
+                if let Some(grandparent) = parent.parent() {
+                    paths_to_try.push(grandparent.join(format!("assets/{}", workflow_file)));
+                }
+            }
+        }
+    }
+    
+    if let Some(home) = dirs::home_dir() {
+        paths_to_try.push(home.join(format!("Projects/Horizon/assets/{}", workflow_file)));
+        paths_to_try.push(home.join(format!("Projects/Horizon/src-tauri/assets/{}", workflow_file)));
+    }
+
+    let mut workflow_path = paths_to_try[0].clone();
+    let mut found = false;
+    for path in paths_to_try {
+        if path.exists() {
+            workflow_path = path;
+            found = true;
+            break;
+        }
+    }
+
+    println!("ComfyUI: Loading inpaint workflow from {:?}", workflow_path);
+    
+    let mut workflow: Value = if found {
+        let content = std::fs::read_to_string(&workflow_path).map_err(|e| format!("{}: {:?}", e, workflow_path))?;
+        serde_json::from_str(&content).map_err(|e| e.to_string())?
+    } else {
+        return Err(format!("Workflow template missing at assets/{}. Tried: {:?}", workflow_file, workflow_path).into());
+    };
+
+    let client = Client::new();
+    
+    // 3. Upload source image and mask
+    let uploaded_image_name = upload_image_to_comfyui(&client, &image_path).await?;
+    let uploaded_mask_name = upload_base64_to_comfyui(&client, &mask_base64, "horizon_mask.png").await?;
+
+    // 4. Inject prompt, etc.
+    let seed = chrono::Utc::now().timestamp_millis() as u64;
+
+    if let Some(nodes) = workflow.as_object_mut() {
+        for node in nodes.values_mut() {
+            if let Some(inputs) = node["inputs"].as_object_mut() {
+                if inputs.contains_key("seed") {
+                    inputs["seed"] = serde_json::json!(seed);
+                }
+                if inputs.contains_key("noise_seed") {
+                    inputs["noise_seed"] = serde_json::json!(seed);
+                }
+                if let Some(Value::String(s)) = inputs.get("image") {
+                    if s == "HORIZON_INPUT_IMAGE" {
+                        inputs["image"] = Value::String(uploaded_image_name.clone());
+                    } else if s == "HORIZON_MASK_IMAGE" {
+                        inputs["image"] = Value::String(uploaded_mask_name.clone());
+                    }
+                }
+            }
+
+            if node["class_type"] == "CLIPTextEncode" {
+                if let Some(inputs) = node["inputs"].as_object_mut() {
+                    if let Some(text) = inputs.get("text").and_then(|v| v.as_str()) {
+                        if text.contains("masterpiece") {
+                            inputs["text"] = Value::String(format!("score_9, score_8_up, score_7_up, {}, {}, masterpiece, highly detailed", s.image_rating, prompt));
+                        } else if text.contains("nsfw") {
+                            let neg = negative.clone().unwrap_or_default();
+                            inputs["text"] = Value::String(format!("score_4, score_5, score_6, source_pony, source_cartoon, rating_explicit, rating_questionable, nsfw, nude, naked, bad anatomy, bad proportions, deformed, ugly, bad quality, blurry, watermark, extra limbs, missing limbs, mutated, {}", neg));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 5. Submit to ComfyUI
+    let resp = client
+        .post("http://127.0.0.1:8188/prompt")
+        .json(&serde_json::json!({ "prompt": workflow }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to queue prompt: {}", e))?;
+
+    let body: Value = resp.json().await.map_err(|e| e.to_string())?;
+    
+    if let Some(prompt_id) = body["prompt_id"].as_str() {
+        let mut image_info = None;
+        println!("ComfyUI: Inpaint prompt queued (ID: {}). Waiting for generation...", prompt_id);
+        
+        for i in 0..600 {
+            sleep(Duration::from_secs(1)).await;
+            
+            if i % 30 == 0 && i > 0 {
+                println!("ComfyUI: Still waiting... ({}s)", i);
+            }
+            
+            let hist_resp = client
+                .get(format!("http://127.0.0.1:8188/history/{}", prompt_id))
+                .send()
+                .await;
+            
+            if let Ok(hr) = hist_resp {
+                let history: Value = hr.json().await.map_err(|e| e.to_string())?;
+                if !history[prompt_id].is_null() {
+                    if let Some(outputs) = history[prompt_id]["outputs"].as_object() {
+                        for node_output in outputs.values() {
+                            if let Some(images) = node_output["images"].as_array() {
+                                if let Some(img) = images.first() {
+                                    image_info = Some((
+                                        img["filename"].as_str().unwrap_or_default().to_string(),
+                                        img["subfolder"].as_str().unwrap_or_default().to_string(),
+                                        img["type"].as_str().unwrap_or_default().to_string(),
+                                    ));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        let (filename, subfolder, img_type) = image_info.ok_or("Generation timed out or failed")?;
+
+        // 6. Download image
+        let img_resp = client
+            .get("http://127.0.0.1:8188/view")
+            .query(&[
+                ("filename", &filename),
+                ("subfolder", &subfolder),
+                ("type", &img_type),
+            ])
+            .send()
+            .await
+            .map_err(|e| format!("Failed to download image: {}", e))?;
+
+        let bytes = img_resp.bytes().await.map_err(|e| e.to_string())?;
+
         let comfyui_output = std::path::PathBuf::from(&s.comfyui_path)
             .parent()
             .unwrap_or(std::path::Path::new("."))

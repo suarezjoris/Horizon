@@ -118,6 +118,31 @@ const filePreviewArea = document.getElementById('file-preview-area');
 let attachedFilesText = "";
 let attachedFileNames = [];
 
+window.handleLLMDropFiles = async (files) => {
+  if (files && files.length > 0) {
+    filePreviewArea.style.display = 'block';
+    filePreviewArea.textContent = `Extracting ${files.length} file(s)...`;
+    
+    try {
+      for (const file of files) {
+        const content = await invoke('read_file_content', { path: file });
+        if (content.type === "Image") {
+           // wait, we will use read_file_content returning FileContent
+           attachedFilesText += `\n\n--- Image Attached ---\n[Base64 Image Data - Hidden]\n---\n`;
+           // To be implemented: sending image to llm if vision model. But for now text is returned.
+        }
+        
+        let textContent = content.data || content; // support old and new formats
+        attachedFilesText += `\n\n--- Content from ${file} ---\n${textContent}\n---\n`;
+        attachedFileNames.push(file.split('/').pop().split('\\').pop());
+      }
+      filePreviewArea.textContent = `Attached: ${attachedFileNames.join(', ')}`;
+    } catch (err) {
+      filePreviewArea.textContent = `Error reading file: ${err}`;
+    }
+  }
+};
+
 attachBtn.addEventListener('click', async () => {
   try {
     const file = await window.__TAURI__.dialog.open({
@@ -125,14 +150,7 @@ attachBtn.addEventListener('click', async () => {
       title: 'Select a file to extract'
     });
     if (file) {
-      filePreviewArea.style.display = 'block';
-      filePreviewArea.textContent = `Extracting ${file}...`;
-      
-      const content = await invoke('read_file_content', { path: file });
-      attachedFilesText += `\n\n--- Content from ${file} ---\n${content}\n---\n`;
-      attachedFileNames.push(file.split('/').pop().split('\\').pop());
-      
-      filePreviewArea.textContent = `Attached: ${attachedFileNames.join(', ')}`;
+      window.handleLLMDropFiles([file]);
     }
   } catch (err) {
     filePreviewArea.style.display = 'block';
@@ -306,11 +324,7 @@ async function send() {
 
   sendBtn.disabled = true;
   addBubble('user', displayText);
-  // If Pax injected a question visually, add it to history so the LLM has context
-  if (pendingPaxQuestion) {
-    messages.push({ role: 'assistant', content: pendingPaxQuestion });
-    pendingPaxQuestion = null;
-  }
+
   messages.push({ role: 'user', content: llmText });
 
   streamingBubble = addBubble('ai', '');
@@ -322,6 +336,7 @@ async function send() {
 
   // Agent V4 event handlers
   let unlistenThinking, unlistenToolStart, unlistenToolDone, unlistenToolError;
+  let activeToolArgs = null;
   const cleanupAgentListeners = async () => {
     if (unlistenThinking)  { await unlistenThinking();  unlistenThinking = null; }
     if (unlistenToolStart) { await unlistenToolStart(); unlistenToolStart = null; }
@@ -337,19 +352,27 @@ async function send() {
 
   unlistenToolStart = await listen('agent-tool-start', e => {
     const { tool, args } = e.payload;
+    activeToolArgs = args;
     const argStr = Object.entries(args || {}).map(([k,v]) => `${k}=${JSON.stringify(v)}`).join(', ');
     streamingBubble.textContent = `[${tool}(${argStr})]`;
   });
 
   unlistenToolDone = await listen('agent-tool-done', e => {
     const { tool, result, ms } = e.payload;
-    const preview = (result || '').substring(0, 80).replace(/\n/g, ' ');
+    if (tool === 'edit_file' && activeToolArgs) {
+        // Render diff preview
+        const { search, replace } = activeToolArgs;
+        renderDiffPreview(streamingBubble, activeToolArgs.path, search, replace);
+    }
+    const preview = (typeof result === 'string' ? result : JSON.stringify(result)).substring(0, 80).replace(/\n/g, ' ');
     streamingBubble.textContent = `[${tool} → ${preview || '(done)'}]`;
+    activeToolArgs = null;
   });
 
   unlistenToolError = await listen('agent-tool-error', e => {
     const { tool, error } = e.payload;
     streamingBubble.textContent = `[${tool} error: ${error}]`;
+    activeToolArgs = null;
   });
 
   unlistenToken = await listen('llm-token', async e => {
@@ -391,6 +414,7 @@ async function send() {
     const fullMsg = e.payload;
     if (window.marked && window.DOMPurify) {
         streamingBubble.innerHTML = DOMPurify.sanitize(marked.parse(fullMsg));
+        enhanceCodeBlocks(streamingBubble);
     } else {
         streamingBubble.textContent = fullMsg;
     }
@@ -430,37 +454,8 @@ async function send() {
   }
 }
 
-// Pax daemon — AI-initiated questions based on RAG gap detection
-let pendingPaxQuestion = null;
-listen('pax-question', async event => {
-  const question = event.payload?.question;
-  if (!question) return;
-  addBubble('ai', question);
-  pendingPaxQuestion = question;
-});
 
-// Drag and Drop support
-listen('tauri://file-drop', async event => {
-  const activeTab = document.querySelector('.tab.active');
-  if (activeTab && activeTab.dataset.tab !== 'llm') return;
-  
-  const files = event.payload;
-  if (files && files.length > 0) {
-    filePreviewArea.style.display = 'block';
-    filePreviewArea.textContent = `Extracting ${files.length} file(s)...`;
-    
-    try {
-      for (const file of files) {
-        const content = await invoke('read_file_content', { path: file });
-        attachedFilesText += `\n\n--- Content from ${file} ---\n${content}\n---\n`;
-        attachedFileNames.push(file.split('/').pop().split('\\').pop());
-      }
-      filePreviewArea.textContent = `Attached: ${attachedFileNames.join(', ')}`;
-    } catch (err) {
-      filePreviewArea.textContent = `Error reading file: ${err}`;
-    }
-  }
-});
+
 
 sendBtn.addEventListener('click', send);
 input.addEventListener('keydown', e => {
@@ -470,6 +465,37 @@ input.addEventListener('input', () => {
   input.style.height = 'auto';
   input.style.height = Math.min(input.scrollHeight, 120) + 'px';
 });
+
+const exportPdfBtn = document.getElementById('export-pdf-btn');
+if (exportPdfBtn) {
+  exportPdfBtn.addEventListener('click', async () => {
+    const bubbles = document.querySelectorAll('.bubble');
+    if (bubbles.length === 0) {
+      alert("Chat is empty.");
+      return;
+    }
+    
+    const visualMessages = Array.from(bubbles).map(b => {
+      let role = 'system';
+      if (b.classList.contains('user')) role = 'user';
+      else if (b.classList.contains('ai')) role = 'assistant';
+      return { role, content: b.innerText || b.textContent };
+    });
+
+    const originalText = exportPdfBtn.textContent;
+    exportPdfBtn.textContent = '⏳ Exporting...';
+    exportPdfBtn.disabled = true;
+    try {
+      const path = await invoke('export_chat_as_pdf', { messages: visualMessages });
+      addBubble('system', `Chat exported as PDF: ${path}`);
+    } catch (e) {
+      alert(`Export failed: ${e}`);
+    } finally {
+      exportPdfBtn.textContent = originalText;
+      exportPdfBtn.disabled = false;
+    }
+  });
+}
 
 // --- Pax banner (non-chat triggers: startup, forge, workspace) ---
 let pendingPaxBannerQuestion = null;
@@ -495,3 +521,114 @@ document.getElementById('pax-banner-dismiss')?.addEventListener('click', () => {
     document.getElementById('pax-banner').style.display = 'none';
     pendingPaxBannerQuestion = null;
 });
+
+// --- Code Execution Preview ---
+function isRunnable(lang) {
+    return ['python', 'python3', 'bash', 'sh', 'javascript', 'js', 'node', 'rust'].includes(lang.toLowerCase());
+}
+
+function detectLanguage(codeBlock) {
+    const classList = Array.from(codeBlock.classList);
+    const langClass = classList.find(c => c.startsWith('language-'));
+    return langClass ? langClass.replace('language-', '') : '';
+}
+
+function enhanceCodeBlocks(bubbleEl) {
+    bubbleEl.querySelectorAll('pre > code').forEach(block => {
+        const lang = detectLanguage(block);
+        if (!lang) return;
+        
+        const pre = block.parentElement;
+        if (pre.previousElementSibling && pre.previousElementSibling.classList.contains('code-toolbar')) return;
+
+        const toolbar = document.createElement('div');
+        toolbar.className = 'code-toolbar';
+        
+        const langBadge = document.createElement('span');
+        langBadge.className = 'lang-badge';
+        langBadge.textContent = lang;
+        toolbar.appendChild(langBadge);
+
+        const actions = document.createElement('div');
+        actions.className = 'code-actions';
+
+        if (isRunnable(lang)) {
+            const runBtn = document.createElement('button');
+            runBtn.innerHTML = '▶ Run';
+            runBtn.className = 'run-btn';
+            runBtn.onclick = async () => {
+                const code = block.textContent;
+                let outputPanel = pre.nextElementSibling;
+                if (!outputPanel || !outputPanel.classList.contains('output-panel')) {
+                    outputPanel = document.createElement('pre');
+                    outputPanel.className = 'output-panel';
+                    pre.parentElement.insertBefore(outputPanel, pre.nextSibling);
+                }
+                
+                outputPanel.style.display = 'block';
+                outputPanel.textContent = 'Running...';
+                
+                try {
+                    const result = await invoke('execute_code_preview', { code, language: lang });
+                    outputPanel.textContent = result.stdout;
+                } catch (err) {
+                    outputPanel.textContent = `Error: ${err}`;
+                }
+            };
+            actions.appendChild(runBtn);
+        }
+
+        const copyBtn = document.createElement('button');
+        copyBtn.innerHTML = '📋 Copy';
+        copyBtn.className = 'copy-btn';
+        copyBtn.onclick = () => {
+            navigator.clipboard.writeText(block.textContent);
+            copyBtn.innerHTML = '✅ Copied';
+            setTimeout(() => copyBtn.innerHTML = '📋 Copy', 2000);
+        };
+        actions.appendChild(copyBtn);
+
+        toolbar.appendChild(actions);
+        pre.parentElement.insertBefore(toolbar, pre);
+    });
+}
+
+function renderDiffPreview(streamingBubble, path, search, replace) {
+    const row = document.createElement('div');
+    row.className = 'bubble-row ai';
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar ai';
+    avatar.textContent = 'H';
+    
+    const diffBubble = document.createElement('div');
+    diffBubble.className = 'bubble ai diff-preview';
+    diffBubble.innerHTML = `<strong>File Edited: <code>${path}</code></strong>`;
+    
+    const diffPanel = document.createElement('div');
+    diffPanel.className = 'diff-panel';
+    
+    const searchLines = (search || '').split('\n');
+    const replaceLines = (replace || '').split('\n');
+    
+    // Simple line-by-line diff display
+    searchLines.forEach(line => {
+        const div = document.createElement('div');
+        div.className = 'diff-line diff-removed';
+        div.textContent = '- ' + line;
+        diffPanel.appendChild(div);
+    });
+    
+    replaceLines.forEach(line => {
+        const div = document.createElement('div');
+        div.className = 'diff-line diff-added';
+        div.textContent = '+ ' + line;
+        diffPanel.appendChild(div);
+    });
+    
+    diffBubble.appendChild(diffPanel);
+    row.append(avatar, diffBubble);
+    
+    // Insert before the streaming bubble's row
+    const streamRow = streamingBubble.parentElement;
+    streamRow.parentElement.insertBefore(row, streamRow);
+}

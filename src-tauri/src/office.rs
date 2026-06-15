@@ -3,6 +3,8 @@ use rust_xlsxwriter::{Workbook, Format, Color};
 use std::path::PathBuf;
 use crate::settings;
 use serde::Deserialize;
+use genpdf::{Document, Element, fonts, style};
+use genpdf::elements::{Paragraph as PdfParagraph, Break, TableLayout};
 
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
@@ -31,6 +33,7 @@ pub struct DocxContent {
     pub filename: String,
     pub title: String,
     pub elements: Vec<DocxElement>,
+    pub template: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -50,6 +53,7 @@ pub struct PptxContent {
     pub filename: String,
     pub title: String,
     pub slides: Vec<PptxSlide>,
+    pub template: Option<String>,
 }
 
 #[derive(Deserialize, serde::Serialize)]
@@ -57,6 +61,25 @@ pub struct PptxSlide {
     pub title: String,
     pub intro: String,
     pub bullets: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub struct PdfContent {
+    pub filename: String,
+    pub title: String,
+    pub elements: Vec<PdfElement>,
+    pub template: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum PdfElement {
+    Heading { level: u8, text: String },
+    Paragraph { text: String, bold: Option<bool>, italic: Option<bool> },
+    Table { headers: Vec<String>, rows: Vec<Vec<String>> },
+    Image { path: String, caption: Option<String> },
+    PageBreak,
+    List { items: Vec<String>, ordered: Option<bool> },
 }
 
 #[tauri::command]
@@ -75,16 +98,36 @@ pub async fn generate_docx(content: DocxContent) -> Result<String, String> {
     let filename = if safe_filename.ends_with(".docx") { safe_filename } else { format!("{}.docx", safe_filename) };
     path.push(&filename);
 
-    let mut doc = Docx::new()
-        .add_paragraph(Paragraph::new()
-            .add_run(Run::new()
-                .add_text(&content.title)
-                .bold()
-                .size(48)
-                .color("2E74B5")
-                .fonts(RunFonts::new().ascii("Calibri")))
-            .align(AlignmentType::Center)
-            .line_spacing(LineSpacing::new().after(600)));
+    let mut doc = if let Some(tpl_name) = &content.template {
+        let tpl_path = PathBuf::from(&s.vault_path).join("templates/docx").join(format!("{}.docx", tpl_name));
+        if tpl_path.exists() {
+            if let Ok(buf) = std::fs::read(&tpl_path) {
+                if let Ok(loaded) = read_docx(&buf) {
+                    loaded
+                } else {
+                    Docx::new()
+                }
+            } else {
+                Docx::new()
+            }
+        } else {
+            Docx::new()
+        }
+    } else {
+        Docx::new()
+    };
+
+    // Only add the main title if we didn't load from a template, 
+    // or if you want to always prepend it
+    doc = doc.add_paragraph(Paragraph::new()
+        .add_run(Run::new()
+            .add_text(&content.title)
+            .bold()
+            .size(48)
+            .color("2E74B5")
+            .fonts(RunFonts::new().ascii("Calibri")))
+        .align(AlignmentType::Center)
+        .line_spacing(LineSpacing::new().after(600)));
 
     for el in content.elements {
         match el {
@@ -176,11 +219,16 @@ pub async fn generate_pptx(content: PptxContent) -> Result<String, String> {
     let mut data = serde_json::to_value(&content).map_err(|e| e.to_string())?;
     data["output_path"] = serde_json::json!(output_path.to_string_lossy());
     
-    // Check for master template (priority: assets > documents)
+    // Check for master template (priority: arg > assets > documents)
+    let explicit_template = content.template.as_ref().map(|t| PathBuf::from(&s.vault_path).join("templates/pptx").join(format!("{}.pptx", t)));
     let master_template = PathBuf::from(&s.vault_path).join("assets/template.pptx");
     let user_template = base_path.join("template.pptx");
     
-    if master_template.exists() {
+    if let Some(et) = explicit_template {
+        if et.exists() {
+            data["template_path"] = serde_json::json!(et.to_string_lossy());
+        }
+    } else if master_template.exists() {
         data["template_path"] = serde_json::json!(master_template.to_string_lossy());
     } else if user_template.exists() {
         data["template_path"] = serde_json::json!(user_template.to_string_lossy());
@@ -242,6 +290,84 @@ pub async fn generate_xlsx(content: XlsxContent) -> Result<String, String> {
     }
 
     workbook.save(&path).map_err(|e| e.to_string())?;
+
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn generate_pdf(content: PdfContent) -> Result<String, String> {
+    let s = settings::load();
+    let mut path = PathBuf::from(&s.vault_path).join("documents");
+    std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+
+    let safe_filename = std::path::Path::new(&content.filename)
+        .file_name()
+        .unwrap_or(std::ffi::OsStr::new("document"))
+        .to_string_lossy()
+        .into_owned();
+
+    let filename = if safe_filename.ends_with(".pdf") { safe_filename } else { format!("{}.pdf", safe_filename) };
+    path.push(&filename);
+
+    let font_dir = std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("src/fonts");
+    
+    let font_family = match fonts::from_files(&font_dir, "Inter", None) {
+        Ok(f) => f,
+        Err(_) => return Err("Could not load fonts from src/fonts".to_string()),
+    };
+
+    let mut doc = Document::new(font_family);
+    doc.set_title(&content.title);
+
+    doc.push(PdfParagraph::new(&content.title).styled(style::Style::new().bold().with_font_size(24)));
+    doc.push(Break::new(1));
+
+    for element in content.elements {
+        match element {
+            PdfElement::Heading { level, text } => {
+                let size = match level { 1 => 20, 2 => 16, 3 => 14, _ => 12 };
+                doc.push(PdfParagraph::new(text).styled(style::Style::new().bold().with_font_size(size)));
+            }
+            PdfElement::Paragraph { text, bold, italic } => {
+                let mut style = style::Style::new().with_font_size(12);
+                if bold.unwrap_or(false) { style = style.bold(); }
+                if italic.unwrap_or(false) { style = style.italic(); }
+                doc.push(PdfParagraph::new(text).styled(style));
+            }
+            PdfElement::Table { headers, rows } => {
+                let mut table = TableLayout::new(vec![1; headers.len()]);
+                let mut header_row = table.row();
+                for h in headers {
+                    header_row.push_element(PdfParagraph::new(h).styled(style::Style::new().bold()));
+                }
+                header_row.push().map_err(|e| e.to_string())?;
+                
+                for r in rows {
+                    let mut data_row = table.row();
+                    for cell in r {
+                        data_row.push_element(PdfParagraph::new(cell));
+                    }
+                    data_row.push().map_err(|e| e.to_string())?;
+                }
+                doc.push(table);
+            }
+            PdfElement::Image { path: _, caption: _ } => {
+                doc.push(PdfParagraph::new("[Image Placeholder]").styled(style::Style::new().italic()));
+            }
+            PdfElement::PageBreak => {
+                doc.push(Break::new(1));
+            }
+            PdfElement::List { items, ordered: _ } => {
+                for item in items {
+                    doc.push(PdfParagraph::new(format!("• {}", item)));
+                }
+            }
+        }
+    }
+
+    doc.render_to_file(&path).map_err(|e| e.to_string())?;
 
     Ok(path.to_string_lossy().to_string())
 }
