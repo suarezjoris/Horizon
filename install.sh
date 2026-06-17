@@ -70,9 +70,9 @@ if [ ! -d "$PROJECT_ROOT/.venv" ]; then
 fi
 ~/.local/bin/uv pip install -q --upgrade \
     --python "$PROJECT_ROOT/.venv/bin/python3" \
-    ddgs readability-lxml requests 2>/dev/null \
+    ddgs readability-lxml requests mcp 2>/dev/null \
     || "$PROJECT_ROOT/.venv/bin/python3" -m pip install -q --upgrade \
-        ddgs readability-lxml requests
+        ddgs readability-lxml requests mcp
 
 # ── 6. Ollama & Models ────────────────────────────────────────────────────────
 echo "🧠 Setting up Ollama..."
@@ -82,10 +82,19 @@ if ! command -v ollama &>/dev/null; then
 fi
 
 echo "📥 Pulling models (this may take a while)..."
-ollama pull qwen2.5:14b
+ollama pull qwen2.5-coder:14b
+ollama pull qwen2.5-coder:32b
 ollama pull llama3.1:8b
 ollama pull nomic-embed-text:latest
 ollama pull moondream:latest
+
+# ── 6b. Ollama VRAM Optimization ─────────────────────────────────────────────
+echo "⚡ Optimizing Ollama for VRAM efficiency..."
+sudo mkdir -p /etc/systemd/system/ollama.service.d
+printf '[Service]\nEnvironment="OLLAMA_KV_CACHE_TYPE=q4_0"\nEnvironment="OLLAMA_FLASH_ATTENTION=1"\nEnvironment="OLLAMA_NUM_PARALLEL=1"\n' \
+    | sudo tee /etc/systemd/system/ollama.service.d/optimize.conf > /dev/null
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
 
 # ── 7. ComfyUI Setup ──────────────────────────────────────────────────────────
 echo "🖼  Setting up ComfyUI..."
@@ -149,7 +158,8 @@ if [ ! -f "$HOME/.config/horizon/settings.json" ]; then
     cat <<EOF > "$HOME/.config/horizon/settings.json"
 {
   "vault_path": "$VAULT_PATH",
-  "llm_model": "qwen2.5:14b",
+  "llm_model": "qwen2.5-coder:14b",
+  "heavy_model": "qwen2.5-coder:32b",
   "roleplay_model": "llama3.1:8b",
   "comfyui_path": "$PROJECT_ROOT/ComfyUI/main.py",
   "embeddings_path": "$HOME/.local/share/horizon/embeddings.bin",
@@ -163,7 +173,7 @@ if [ ! -f "$HOME/.config/horizon/settings.json" ]; then
     "antenna_token": "changeme",
     "antenna_port": 8374,
     "vanguard_interval_minutes": 30,
-    "light_model": "qwen2.5:14b",
+    "light_model": "qwen2.5-coder:14b",
     "vanguard_feeds": [
       "https://news.ycombinator.com/rss",
       "https://feeds.feedburner.com/TheHackersNews"

@@ -35,7 +35,7 @@ async fn compile_and_run_rust(code: &str, workspace: &Path) -> Result<String, St
 
 #[tauri::command]
 pub async fn execute_code_preview(
-    app: AppHandle,
+    _app: AppHandle,
     code: String,
     language: String,
 ) -> Result<CodeResult, String> {

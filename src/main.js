@@ -42,18 +42,14 @@ document.getElementById('settings-btn').addEventListener('click', async () => {
   currentSettings = await window.__TAURI__.core.invoke('get_settings');
   document.getElementById('s-vault').value = currentSettings.vault_path;
   document.getElementById('s-llm').value = currentSettings.llm_model;
+  document.getElementById('s-heavy').value = currentSettings.heavy_model || '';
   document.getElementById('s-rp').value = currentSettings.roleplay_model;
   document.getElementById('s-comfy').value = currentSettings.comfyui_path;
   document.getElementById('s-rating').value = currentSettings.image_rating || 'rating_safe';
   
 
-  
-  if (currentSettings.memory_decay) {
-    document.getElementById('s-decay-enabled').checked = currentSettings.memory_decay.enabled;
-    document.getElementById('s-decay-hl').value = currentSettings.memory_decay.half_life_days || 30.0;
-    document.getElementById('s-decay-boost').value = currentSettings.memory_decay.access_boost_factor || 0.1;
-    document.getElementById('s-decay-min').value = currentSettings.memory_decay.min_score_threshold || 0.05;
-  }
+  // Load MCP Store Extensions
+  loadMcpStore();
 });
 
 document.getElementById('settings-overlay').addEventListener('click', e => {
@@ -65,16 +61,12 @@ document.getElementById('settings-save').addEventListener('click', async () => {
     ...currentSettings,
     vault_path: document.getElementById('s-vault').value,
     llm_model: document.getElementById('s-llm').value,
+    heavy_model: document.getElementById('s-heavy').value,
     roleplay_model: document.getElementById('s-rp').value,
     comfyui_path: document.getElementById('s-comfy').value,
     image_rating: document.getElementById('s-rating').value,
 
-    memory_decay: {
-      enabled: document.getElementById('s-decay-enabled').checked,
-      half_life_days: parseFloat(document.getElementById('s-decay-hl').value) || 30.0,
-      access_boost_factor: parseFloat(document.getElementById('s-decay-boost').value) || 0.1,
-      min_score_threshold: parseFloat(document.getElementById('s-decay-min').value) || 0.05,
-    }
+
   };
 
   await window.__TAURI__.core.invoke('save_settings', { settings });
@@ -183,3 +175,53 @@ window.switchTab = switchTab;
         console.error("Failed to load plugins:", e);
     }
 })();
+
+window.loadMcpStore = async function() {
+  const container = document.getElementById('mcp-store-container');
+  if (!container) return;
+  
+  container.innerHTML = '<div style="color:rgba(255,255,255,0.5)">Chargement du store...</div>';
+  
+  try {
+    const servers = await window.__TAURI__.core.invoke('get_mcp_store');
+    container.innerHTML = '';
+    
+    const countEl = document.getElementById('mcp-count');
+    if (countEl) countEl.innerText = servers.length;
+    
+    servers.forEach(server => {
+      const sDiv = document.createElement('div');
+      sDiv.style.background = 'rgba(0,0,0,0.2)';
+      sDiv.style.padding = '10px';
+      sDiv.style.borderRadius = '6px';
+      sDiv.style.border = '1px solid rgba(255,255,255,0.05)';
+      
+      sDiv.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <strong style="color:var(--accent-gold)">${server.name}</strong>
+          <button class="mcp-toggle-btn" data-id="${server.id}" style="background: ${server.installed ? 'rgba(0,255,0,0.1)' : 'rgba(255,255,255,0.1)'}; 
+                         border: 1px solid ${server.installed ? 'rgba(0,255,0,0.3)' : 'rgba(255,255,255,0.2)'}; 
+                         color: white; padding: 3px 8px; border-radius: 4px; cursor: pointer;">
+            ${server.installed ? 'Désinstaller' : 'Installer'}
+          </button>
+        </div>
+        <div style="color:rgba(255,255,255,0.6); margin-top: 5px;">${server.description}</div>
+      `;
+      
+      const btn = sDiv.querySelector('.mcp-toggle-btn');
+      btn.addEventListener('click', async () => {
+        try {
+          await window.__TAURI__.core.invoke('toggle_mcp_server', { id: server.id });
+          currentSettings = await window.__TAURI__.core.invoke('get_settings');
+          window.loadMcpStore(); // reload UI
+        } catch (err) {
+          console.error("Erreur toggle MCP:", err);
+        }
+      });
+      
+      container.appendChild(sDiv);
+    });
+  } catch (e) {
+    container.innerHTML = `<div style="color:red">Erreur: ${e}</div>`;
+  }
+};

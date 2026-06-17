@@ -37,50 +37,15 @@ pub async fn get_context(query: &str) -> String {
     if !index.is_empty() {
         if let Ok(vecs) = ollama::embed(vec![query.to_string()], "nomic-embed-text:latest").await {
             if let Some(qvec) = vecs.into_iter().next() {
-                let fetch_k = if s.memory_decay.enabled { TOP_K * 3 } else { TOP_K };
-                let mut results = index.search(&qvec, fetch_k);
-                
-                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+                let results = index.search(&qvec, TOP_K);
 
-                if s.memory_decay.enabled {
-                    let hl = s.memory_decay.half_life_days;
-                    let boost_factor = s.memory_decay.access_boost_factor;
-                    let threshold = s.memory_decay.min_score_threshold;
-                    
-                    let meta_lock = index.metadata.read().unwrap();
-                    results.retain_mut(|res| {
-                        if let Some(meta) = meta_lock.get(&res.id) {
-                            let mut decay_factor = 1.0;
-                            if !meta.pinned {
-                                let days = (now - meta.last_accessed) as f64 / 86400.0;
-                                let days = days.max(0.0);
-                                decay_factor = 0.5f64.powf(days / hl);
-                            }
-                            let access_boost = 1.0 + (1.0 + meta.access_count as f64).log2() * boost_factor;
-                            res.score = (res.score as f64 * decay_factor * access_boost) as f32;
-                            res.score >= threshold as f32
-                        } else {
-                            false
-                        }
-                    });
-                    drop(meta_lock);
-                    
-                    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-                    results.truncate(TOP_K);
-                    
-                    let mut meta_write = index.metadata.write().unwrap();
-                    for res in &results {
-                        if let Some(meta) = meta_write.get_mut(&res.id) {
-                            meta.last_accessed = now;
-                            meta.access_count += 1;
-                        }
-                    }
-                    drop(meta_write);
-                    
-                    let path = s.embeddings_path.clone();
-                    let index_clone = index.clone();
-                    tokio::spawn(async move {
-                        let _ = index_clone.save(&path);
+                let ids: Vec<u64> = results.iter().map(|r| r.id).collect();
+                if !ids.is_empty() {
+                    index.update_access_stats(&ids);
+                    let index_clone = std::sync::Arc::clone(&index);
+                    let path_clone = s.embeddings_path.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let _ = index_clone.save(&path_clone);
                     });
                 }
 

@@ -12,6 +12,25 @@ let streamingBubble = null;
 let unlistenToken = null;
 let unlistenDone = null;
 
+// Model Router indicator
+listen('model-routed', (event) => {
+  const { classification, model } = event.payload;
+  const modelShort = model.split(':')[0].split('/').pop();
+  const isComplex = classification === 'COMPLEX';
+  const indicator = document.createElement('div');
+  indicator.className = 'route-indicator';
+  indicator.style.cssText = `
+    text-align: center; padding: 4px 12px; margin: 4px 0;
+    font-size: 11px; border-radius: 12px; opacity: 0.7;
+    background: ${isComplex ? 'rgba(255,140,0,0.15)' : 'rgba(0,200,100,0.15)'};
+    color: ${isComplex ? '#ffaa44' : '#44ddaa'};
+    border: 1px solid ${isComplex ? 'rgba(255,140,0,0.25)' : 'rgba(0,200,100,0.25)'};
+  `;
+  indicator.textContent = `${isComplex ? '🧠 Heavy' : '⚡ Fast'} → ${modelShort}`;
+  history.appendChild(indicator);
+  history.scrollTop = history.scrollHeight;
+});
+
 async function refreshSelectors() {
     try {
         const models = await invoke('list_ollama_models');
@@ -177,6 +196,15 @@ async function send() {
 
   input.value = '';
   input.style.height = 'auto';
+
+  if (messages.length > 20) {
+    const toConsolidate = messages.slice(0, messages.length - 6);
+    messages = messages.slice(messages.length - 6);
+    addBubble('system', '*(Historique long détecté : consolidation automatique en tâche de fond pour économiser la mémoire...)*');
+    invoke('auto_consolidate_chat', { history: toConsolidate })
+      .then(() => console.log('Auto-consolidation success'))
+      .catch(e => console.error('Auto-consolidation failed', e));
+  }
   
   // Handle Commands
   if (llmText.startsWith('/')) {

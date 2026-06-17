@@ -6,6 +6,45 @@ pub async fn list_ollama_models() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
+pub async fn auto_consolidate_chat(
+    vram_queue: tauri::State<'_, crate::vram_queue::VramQueue>,
+    history: Vec<serde_json::Value>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let _permit = vram_queue.acquire("Auto-consolidate").await?;
+    let mut text = String::new();
+    for msg in history {
+        if let Some(role) = msg.get("role").and_then(|r| r.as_str()) {
+            if let Some(content) = msg.get("content").and_then(|c| c.as_str()) {
+                text.push_str(&format!("{}: {}\n\n", role, content));
+            }
+        }
+    }
+    
+    let prompt = format!(
+        "Summarize the following chat history into a detailed Zettelkasten memory node. \
+        Extract ALL factual data, decisions, code snippets, and important context. \
+        Ignore pleasantries. Output ONLY the raw markdown summary.\n\n{}", 
+        text
+    );
+    
+    let s = settings::load();
+    let summary = ollama::chat_stream(
+        app.clone(),
+        vec![serde_json::json!({"role": "user", "content": prompt})],
+        &s.llm_model,
+        true
+    ).await?;
+    
+    let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let filename = format!("chat_context_{}.md", timestamp);
+    crate::vault::write_vault_note(&s.vault_path, &filename, &summary).map_err(|e| e.to_string())?;
+    let _ = crate::embeddings::reindex().await;
+    
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn probe_model_capabilities(model: String) -> Result<bool, String> {
     let mut s = settings::load();
     let hash = ollama::get_model_hash(&model).await.unwrap_or_default();
@@ -120,55 +159,6 @@ pub async fn search_vault(query: String) -> Result<Vec<String>, String> {
         let preview = &e.chunk[..e.chunk.len().min(200)];
         format!("[{}]\n{}", e.path, preview)
     }).collect())
-}
-
-#[tauri::command]
-pub fn get_note_decay_stats(rel_path: String) -> Result<serde_json::Value, String> {
-    let s = settings::load();
-    let index = embeddings::load_index(&s.embeddings_path);
-    let meta_lock = index.metadata.read().unwrap();
-    
-    let mut total_access = 0;
-    let mut last_accessed = 0;
-    let mut pinned = false;
-    let mut chunk_count = 0;
-    
-    for m in meta_lock.values() {
-        if m.path == rel_path {
-            total_access += m.access_count;
-            if m.last_accessed > last_accessed {
-                last_accessed = m.last_accessed;
-            }
-            pinned = m.pinned;
-            chunk_count += 1;
-        }
-    }
-    
-    if chunk_count == 0 {
-        return Ok(serde_json::json!({
-            "chunks": 0,
-            "status": "not_indexed"
-        }));
-    }
-    
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-    let hl = s.memory_decay.half_life_days;
-    let boost_factor = s.memory_decay.access_boost_factor;
-    
-    let days = ((now - last_accessed) as f64 / 86400.0).max(0.0);
-    let decay_factor = if pinned { 1.0 } else { 0.5f64.powf(days / hl) };
-    let boost = 1.0 + (1.0 + (total_access as f64 / chunk_count as f64)).log2() * boost_factor;
-    let current_multiplier = decay_factor * boost;
-    
-    Ok(serde_json::json!({
-        "chunks": chunk_count,
-        "total_access": total_access,
-        "days_since_access": (days * 10.0).round() / 10.0,
-        "decay_factor": (decay_factor * 100.0).round() / 100.0,
-        "boost_factor": (boost * 100.0).round() / 100.0,
-        "current_multiplier": (current_multiplier * 100.0).round() / 100.0,
-        "pinned": pinned
-    }))
 }
 
 #[tauri::command]

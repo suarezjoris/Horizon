@@ -367,6 +367,37 @@ pub fn build_tool_definitions(include_bash: bool, plugins: &crate::plugins::Plug
             }
         }),
     ];
+    
+    tools.push(serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "fetch_url",
+            "description": "Fetch and scrape plain text content directly from a URL (e.g. GitHub profiles, docs). Use this instead of search_web when given a specific link.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string" }
+                },
+                "required": ["url"]
+            }
+        }
+    }));
+    
+    tools.push(serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "invoke_subagent",
+            "description": "Deploy an independent sub-agent to perform complex research or a multi-step task. The sub-agent has access to all tools and returns a detailed summary of its findings.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task": { "type": "string", "description": "The explicit goal/task for the sub-agent" },
+                    "persona": { "type": "string", "description": "The persona/role for the sub-agent (e.g. 'Research Assistant')" }
+                },
+                "required": ["task", "persona"]
+            }
+        }
+    }));
 
     if include_bash {
         tools.push(serde_json::json!({
@@ -392,7 +423,8 @@ pub async fn execute(
     name: &str,
     args: &serde_json::Value,
     workspace: &Path,
-    plugins: &crate::plugins::PluginRegistry
+    plugins: &crate::plugins::PluginRegistry,
+    app: &tauri::AppHandle
 ) -> Result<String, String> {
     let get = |key: &str| -> Result<&str, String> {
         args[key].as_str().ok_or_else(|| format!("Missing argument: {}", key))
@@ -436,6 +468,100 @@ pub async fn execute(
         }
         "convert_md_to_docx" => {
             crate::md_converter::export_note_as_docx(get("rel_path")?.to_string(), None).await
+        }
+        "fetch_url" => {
+            crate::search::fetch_url(get("url")?).await
+        }
+        "invoke_subagent" => {
+            let task = get("task")?;
+            let persona = get("persona")?;
+            
+            use tauri::Emitter;
+            let _ = app.emit("llm-token", format!("\n*[Deploying Sub-Agent ({}): {}]*\n", persona, task));
+            
+            let mut sub_messages = vec![
+                serde_json::json!({
+                    "role": "system",
+                    "content": format!("You are an autonomous sub-agent with persona: {}. Your explicit task is: {}. You have access to tools. Do deep research and return a highly detailed final report. Do NOT hallucinate.", persona, task)
+                }),
+                serde_json::json!({
+                    "role": "user",
+                    "content": "Begin your task."
+                })
+            ];
+            
+            let mut total_output = String::new();
+            let mut iter = 0;
+            let active_model = crate::settings::load().heavy_model;
+            let tools_def = build_tool_definitions(true, plugins);
+            let ollama_tools: Vec<crate::ollama::Tool> = tools_def.iter().map(|t| {
+                crate::ollama::Tool {
+                    r#type: "function".into(),
+                    function: crate::ollama::ToolFunction {
+                        name: t["function"]["name"].as_str().unwrap_or("").to_string(),
+                        description: t["function"]["description"].as_str().unwrap_or("").to_string(),
+                        parameters: t["function"]["parameters"].clone(),
+                    },
+                }
+            }).collect();
+            
+            while iter < 10 {
+                iter += 1;
+                match crate::ollama::chat_with_tools(app, sub_messages.clone(), &ollama_tools, &active_model).await {
+                    Ok(msg) => {
+                        if let Some(calls) = msg.tool_calls {
+                            if calls.is_empty() {
+                                if let Some(content) = msg.content {
+                                    total_output = content;
+                                }
+                                break;
+                            }
+                            
+                            sub_messages.push(serde_json::json!({
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": calls.iter().map(|tc| serde_json::json!({
+                                    "type": "function",
+                                    "function": { "name": tc.function.name.clone(), "arguments": tc.function.arguments.clone() }
+                                })).collect::<Vec<_>>()
+                            }));
+                            
+                            for tc in &calls {
+                                let tc_name = tc.function.name.clone();
+                                let tc_res = if tc_name == "invoke_subagent" {
+                                    Err("Sub-agents cannot invoke further sub-agents to prevent recursion limits.".into())
+                                } else {
+                                    Box::pin(execute(&tc_name, &tc.function.arguments, workspace, plugins, app)).await
+                                };
+                                
+                                match tc_res {
+                                    Ok(out) => {
+                                        sub_messages.push(serde_json::json!({
+                                            "role": "tool",
+                                            "name": tc_name,
+                                            "content": out
+                                        }));
+                                    }
+                                    Err(e) => {
+                                        sub_messages.push(serde_json::json!({
+                                            "role": "tool",
+                                            "name": tc_name,
+                                            "content": format!("Error: {}\nDO NOT GUESS. Try another tool or alternative approach.", e)
+                                        }));
+                                    }
+                                }
+                            }
+                        } else if let Some(content) = msg.content {
+                            total_output = content;
+                            break;
+                        } else {
+                            break;
+                        }
+                    }
+                    Err(e) => return Err(format!("Sub-agent error: {}", e)),
+                }
+            }
+            Ok(format!("Sub-agent '{}' completed task. Result:\n{}", persona, total_output))
         }
         _ => plugins.execute_tool(name, args).await,
     }

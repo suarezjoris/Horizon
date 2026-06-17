@@ -1,0 +1,24 @@
+{
+  "model": "qwen2.5:14b",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is the git status of /tmp?"
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "mcp_git__git_status",
+        "description": "Get git status",
+        "parameters": {
+          "type": "object",
+          "properties": {"repo_path": {"type": "string"}},
+          "required": ["repo_path"]
+        }
+      }
+    }
+  ],
+  "stream": true
+}

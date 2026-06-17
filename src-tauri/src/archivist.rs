@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use notify::{Watcher, RecursiveMode, EventKind};
 use tauri::{AppHandle, Emitter};
-use crate::{embeddings, settings, ollama, vault};
+use crate::{embeddings, settings};
 
 pub fn categorize_file(filename: &str) -> Option<&'static str> {
     let ext = std::path::Path::new(filename)
@@ -135,19 +135,32 @@ pub async fn run_archivist(app: AppHandle, running: Arc<AtomicBool>) {
                         .collect();
                     if chunks.is_empty() { continue; }
                     
-                    if let Ok(vectors) = crate::ollama::embed(chunks.clone(), "nomic-embed-text:latest").await {
-                        for (chunk, vector) in chunks.into_iter().zip(vectors) {
-                            index.add(&vector, embeddings::ChunkMeta {
-                                path: rel_path.clone(),
-                                chunk,
-                                created_at: now,
-                                last_accessed: now,
-                                access_count: 0,
-                                pinned,
-                            });
+                        if let Ok(vectors) = crate::ollama::embed(chunks.clone(), "nomic-embed-text:latest").await {
+                            for (chunk, vector) in chunks.into_iter().zip(vectors) {
+                                index.add(&vector, embeddings::ChunkMeta {
+                                    path: rel_path.clone(),
+                                    chunk,
+                                    created_at: now,
+                                    last_accessed: now,
+                                    access_count: 0,
+                                    pinned,
+                                });
+                            }
+                        }
+                        
+                        // Idea 3: Semantic Auto-linking (Synto)
+                        if !content.contains("[[") {
+                            let prompt = format!("Agis comme un système Zettelkasten. Lis cette note et déduis 3 ou 4 concepts clés pertinents. Renvoie UNIQUEMENT ces concepts sous forme de liens wiki (ex: [[Concept1]] [[Concept2]]). Pas de phrases, juste les liens.\n\nNote:\n{}", content);
+                            let model = s.agents.light_model.clone();
+                            if let Ok(links_resp) = crate::ollama::chat_once(vec![serde_json::json!({"role": "user", "content": prompt})], &model).await {
+                                let links = links_resp.trim();
+                                if links.contains("[[") {
+                                    let new_content = format!("{}\n\n---\n**Liens Sémantiques Auto:** {}", content.trim(), links);
+                                    let _ = std::fs::write(&path, new_content);
+                                }
+                            }
                         }
                     }
-                }
             }
             if changed {
                 embeddings::save_index(index, &s.embeddings_path);

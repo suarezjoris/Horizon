@@ -13,7 +13,7 @@ pub fn markdown_to_docx_elements(md: &str) -> Vec<DocxElement> {
     let mut in_bold = false;
     let mut in_italic = false;
     let mut list_items = Vec::new();
-    let mut in_list = false;
+    let mut _in_list = false;
     
     for event in parser {
         match event {
@@ -43,11 +43,11 @@ pub fn markdown_to_docx_elements(md: &str) -> Vec<DocxElement> {
             Event::End(TagEnd::Emphasis) => { in_italic = false; }
             Event::Text(text) => { current_text.push_str(&text); }
             Event::Start(Tag::List(_)) => { 
-                in_list = true;
+                _in_list = true;
                 list_items.clear(); 
             }
             Event::End(TagEnd::List(_)) => {
-                in_list = false;
+                _in_list = false;
                 if !list_items.is_empty() {
                     elements.push(DocxElement::List { items: list_items.clone() });
                 }
@@ -78,9 +78,9 @@ pub fn markdown_to_docx_elements(md: &str) -> Vec<DocxElement> {
 #[tauri::command]
 pub async fn export_note_as_docx(
     rel_path: String,
-    template: Option<String>,
+    _template: Option<String>,
 ) -> Result<String, String> {
-    let s = settings::load();
+    let _s = settings::load();
     let md_content = vault::read_note(rel_path.clone())?;
     let elements = markdown_to_docx_elements(&md_content);
     let title = rel_path.trim_end_matches(".md").to_string();

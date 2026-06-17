@@ -58,28 +58,12 @@ pub struct ModelCapability {
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MemoryDecayConfig {
-    pub enabled: bool,
-    pub half_life_days: f64,
-    pub access_boost_factor: f64,
-    pub min_score_threshold: f64,
-}
-
-impl Default for MemoryDecayConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            half_life_days: 30.0,
-            access_boost_factor: 0.1,
-            min_score_threshold: 0.05,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub vault_path: String,
     pub llm_model: String,
+    /// Heavy model for complex reasoning / tool-calling ("Opus local")
+    #[serde(default = "default_heavy_model")]
+    pub heavy_model: String,
     pub roleplay_model: String,
     pub comfyui_path: String,
     pub embeddings_path: String,
@@ -89,9 +73,9 @@ pub struct Settings {
     pub agent_workspace: String,
     #[serde(default)]
     pub model_capabilities: HashMap<String, ModelCapability>,
-
+    pub window_height: f64,
     #[serde(default)]
-    pub memory_decay: MemoryDecayConfig,
+    pub mcp_enabled: HashMap<String, bool>,
 }
 
 impl Default for Settings {
@@ -101,6 +85,7 @@ impl Default for Settings {
         Self {
             vault_path: home.join("Documents/Claude RAG").to_string_lossy().into_owned(),
             llm_model: "qwen2.5-coder:14b".to_string(),
+            heavy_model: "qwen2.5-coder:32b".to_string(),
             roleplay_model: "llama3.1:8b".to_string(),
             comfyui_path: home.join("Projects/Horizon/ComfyUI/main.py").to_string_lossy().into_owned(),
             embeddings_path: data.join("horizon/embeddings.tv").to_string_lossy().into_owned(),
@@ -115,8 +100,8 @@ impl Default for Settings {
                     .into_owned()
             },
             model_capabilities: HashMap::new(),
-
-            memory_decay: MemoryDecayConfig::default(),
+            window_height: 800.0,
+            mcp_enabled: HashMap::new(),
         }
     }
 }
@@ -125,6 +110,10 @@ fn default_agent_workspace() -> String {
     let p = dirs::home_dir().unwrap_or_default().join("Projects/Horizon/workspace");
     std::fs::create_dir_all(&p).ok();
     std::fs::canonicalize(&p).unwrap_or(p).to_string_lossy().into_owned()
+}
+
+fn default_heavy_model() -> String {
+    "qwen2.5-coder:32b".to_string()
 }
 
 fn config_path() -> PathBuf {

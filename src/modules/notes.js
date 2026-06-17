@@ -37,18 +37,6 @@
             noteTitle.value = path.replace('.md', '');
             noteContent.value = content;
             
-            try {
-                const stats = await invoke('get_note_decay_stats', { relPath: path });
-                const statsEl = document.getElementById('note-decay-stats');
-                if (stats.status === "not_indexed") {
-                    statsEl.textContent = "Not indexed";
-                } else {
-                    statsEl.textContent = `Scoring: Decay ${stats.decay_factor}x | Boost ${stats.boost_factor}x | Total Mult ${stats.current_multiplier}x | Access: ${stats.total_access} | Days: ${stats.days_since_access} | ${stats.pinned ? '[PINNED]' : ''}`;
-                }
-            } catch (e) {
-                console.error("Failed to load decay stats", e);
-            }
-            
             refreshNotes();
         } catch (e) {
             alert("Error reading note: " + e);

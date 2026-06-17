@@ -11,17 +11,13 @@ struct ChatRequest {
     // Guarantee the model unloads from VRAM after idle, even if a global
     // OLLAMA_KEEP_ALIVE is set long/infinite. Frees ~VRAM when not chatting.
     keep_alive: String,
+    options: serde_json::Value,
 }
 
 #[derive(Deserialize)]
 struct ChatChunk {
-    message: ChunkMessage,
+    message: AgentMessage,
     done: bool,
-}
-
-#[derive(Deserialize)]
-struct ChunkMessage {
-    content: String,
 }
 
 #[derive(Serialize)]
@@ -54,6 +50,9 @@ pub async fn chat_stream(
             messages,
             stream: true,
             keep_alive: "5m".to_string(),
+            options: serde_json::json!({
+                "num_ctx": 8192
+            }),
         })
         .send()
         .await
@@ -74,12 +73,13 @@ pub async fn chat_stream(
             let line = buf.drain(..=pos).collect::<Vec<u8>>();
             if let Ok(c) = serde_json::from_slice::<ChatChunk>(&line) {
                 if !c.done {
-                    let token = c.message.content;
-                    full.push_str(&token);
-                    if !silent {
-                        // Skip technical tags in UI
-                        if !token.contains("GENERATE_") && !token.contains("SEARCH_WEB") {
-                            let _ = app.emit("llm-token", &token);
+                    if let Some(token) = c.message.content {
+                        full.push_str(&token);
+                        if !silent {
+                            // Skip technical tags in UI
+                            if !token.contains("GENERATE_") && !token.contains("SEARCH_WEB") {
+                                let _ = app.emit("llm-token", &token);
+                            }
                         }
                     }
                 }
@@ -124,6 +124,7 @@ pub async fn chat_once(
 }
 
 /// Describe an image using moondream:latest
+#[allow(dead_code)]
 pub async fn describe_image(base64_image: &str) -> Result<String, String> {
     let resp = HTTP_CLIENT
         .post("http://localhost:11434/api/generate")
@@ -186,31 +187,64 @@ pub struct AgentMessage {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 pub(crate) struct AgentChatResponse {
     pub message: AgentMessage,
 }
 
 pub async fn chat_with_tools(
+    app: &tauri::AppHandle,
     messages: Vec<serde_json::Value>,
     tools: &[Tool],
     model: &str,
 ) -> Result<AgentMessage, String> {
-    let resp = HTTP_CLIENT
+    let response = HTTP_CLIENT
         .post("http://localhost:11434/api/chat")
         .json(&serde_json::json!({
             "model": model,
             "messages": messages,
             "tools": tools,
-            "stream": false,
-            "keep_alive": "2m",
+            "stream": true,
+            "keep_alive": "5m",
+            "options": {
+                "num_ctx": 8192
+            }
         }))
         .send()
         .await
-        .map_err(|e| format!("Ollama unreachable: {e}"))?
-        .json::<AgentChatResponse>()
-        .await
-        .map_err(|e| format!("Ollama parse error: {e}"))?;
-    Ok(resp.message)
+        .map_err(|e| format!("Ollama unreachable: {e}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Ollama error: {}", response.status()));
+    }
+
+    let mut full_content = String::with_capacity(4096);
+    let mut all_tool_calls: Vec<ToolCall> = Vec::new();
+
+    let mut byte_stream = response.bytes_stream();
+    let mut buf: Vec<u8> = Vec::with_capacity(1024);
+
+    while let Some(chunk) = byte_stream.next().await {
+        buf.extend_from_slice(&chunk.map_err(|e| e.to_string())?);
+        
+        while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+            let line = buf.drain(..=pos).collect::<Vec<u8>>();
+            if let Ok(c) = serde_json::from_slice::<ChatChunk>(&line) {
+                if let Some(token) = c.message.content {
+                    full_content.push_str(&token);
+                    let _ = app.emit("llm-token", &token);
+                }
+                if let Some(calls) = c.message.tool_calls {
+                    all_tool_calls.extend(calls);
+                }
+            }
+        }
+    }
+
+    Ok(AgentMessage {
+        content: if full_content.is_empty() { None } else { Some(full_content) },
+        tool_calls: if all_tool_calls.is_empty() { None } else { Some(all_tool_calls) },
+    })
 }
 
 pub async fn list_models() -> Result<Vec<String>, String> {

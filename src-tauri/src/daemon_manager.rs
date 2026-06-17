@@ -1,7 +1,6 @@
 use crate::{antenna, app_state::ArmataState, archivist, armata, forge_daemon, settings, vanguard, wiki_daemon};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use tauri::Manager;
-use tokio::sync::mpsc;
 
 #[tauri::command]
 pub async fn toggle_agent_daemon(

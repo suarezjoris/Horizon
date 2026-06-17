@@ -64,6 +64,7 @@ pub struct PptxSlide {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 pub struct PdfContent {
     pub filename: String,
     pub title: String,

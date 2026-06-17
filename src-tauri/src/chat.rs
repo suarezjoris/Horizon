@@ -92,6 +92,7 @@ pub async fn chat(
             let _ = app.emit("agent-thinking", true);
 
             let agent_msg = match ollama::chat_with_tools(
+                &app,
                 current_messages.clone(),
                 &ollama_tools,
                 &active_model,
@@ -132,11 +133,26 @@ pub async fn chat(
                         &tc.function.name,
                         &tc.function.arguments,
                         workspace,
-                        &*plugin_registry
+                        &*plugin_registry,
+                        &app
                     ).await;
                     let ms = t0.elapsed().as_millis();
 
                     match result {
+                        Ok(output) if output == "__HORIZON_EMPTY_RESULT__" => {
+                            error_count = 0;
+                            let msg = "[SYSTEM ENFORCEMENT] Tool execution returned NO results. HALLUCINATION RISK CRITICAL. You are FORBIDDEN to answer the user's question using assumptions. You MUST either invoke a different tool, use new search keywords, or reply explicitly: \"Je ne trouve pas cette information.\"";
+                            let _ = app.emit("agent-tool-done", serde_json::json!({
+                                "tool": &tc.function.name,
+                                "result": msg,
+                                "ms": ms
+                            }));
+                            current_messages.push(serde_json::json!({
+                                "role": "tool",
+                                "name": &tc.function.name,
+                                "content": msg
+                            }));
+                        }
                         Ok(output) => {
                             error_count = 0;
                             let _ = app.emit("agent-tool-done", serde_json::json!({
@@ -162,10 +178,11 @@ pub async fn chat(
                                 "error": &e
                             }));
 
+                            let err_msg = format!("[SYSTEM ENFORCEMENT] Tool Error: {}\nDO NOT FABRICATE INFORMATION. Try another approach or state you don't know.", e);
                             current_messages.push(serde_json::json!({
                                 "role": "tool",
                                 "name": &tc.function.name,
-                                "content": format!("Error: {}", e)
+                                "content": err_msg
                             }));
 
                             if error_count >= 3 {
@@ -429,13 +446,19 @@ fn build_system_prompt(system_base: &str, context: &str) -> String {
 
 fn build_agent_system_prompt(system_base: &str, context: &str) -> String {
     format!(
-        "{}\n\nYou are an autonomous agent. Use the provided tools to complete tasks.\n\
-        RULES:\n\
-        1. LANGUAGE: Always respond in the SAME LANGUAGE as the user's request.\n\
-        2. ACCURACY: Do not speculate or fabricate facts.\n\
-        3. Use search_web for any question about current events, prices, or real-time data.\n\
-        4. Use generate_image to create images when asked.\n\
-        5. When done with all tool calls, write a clear natural-language summary.\n\n\
+        "{}\n\nYou are an advanced autonomous agent operating in Horizon.\n\
+        <ERROR_HANDLING_PROTOCOL>\n\
+        - You are strictly FORBIDDEN from guessing or hallucinating facts, URLs, or GitHub repositories.\n\
+        - If a tool returns NO RESULTS or an ERROR, you MUST NOT formulate an answer based on your internal weights. You must reply: \"Je n'ai pas pu trouver cette information\" or try an alternative tool.\n\
+        </ERROR_HANDLING_PROTOCOL>\n\
+        \n\
+        <ROUTING_PROTOCOL>\n\
+        1. LOCAL DATA: If the user asks about their own notes or projects, use `search_vault`.\n\
+        2. INTERNET SEARCH: If the user asks about public figures, real-world events, or general knowledge, use `search_web`.\n\
+        3. URL SCRAPING: If the user provides a specific URL (like github.com/username), DO NOT use search_web. You MUST use `fetch_url` to read the raw page content.\n\
+        4. COMPLEX RESEARCH: If the user asks for a deep dive, extensive analysis, or multi-step research, use `invoke_subagent` to delegate the work to a specialized sub-agent.\n\
+        </ROUTING_PROTOCOL>\n\
+        \n\
         Local Memory Context:\n---\n{}\n---",
         system_base, context
     )

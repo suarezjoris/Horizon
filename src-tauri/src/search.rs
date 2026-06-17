@@ -15,7 +15,12 @@ pub async fn duckduckgo_search(query: &str) -> Result<String, String> {
         return Err("Web search failed".into());
     }
 
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if result.is_empty() || result.to_lowercase().contains("no results found") {
+        Ok("__HORIZON_EMPTY_RESULT__".to_string())
+    } else {
+        Ok(result)
+    }
 }
 
 pub async fn scrape_youtube(url: &str) -> Result<String, String> {
@@ -150,4 +155,48 @@ pub async fn super_rag(query: &str, text: &str, top_k: usize) -> Result<String, 
     
     let combined = best_chunks.join("\n\n...\n\n");
     Ok(combined)
+}
+
+pub async fn fetch_url(url: &str) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+        .build()
+        .map_err(|e| format!("Failed to build client: {}", e))?;
+    
+    let resp = client.get(url).send().await.map_err(|e| format!("Failed to fetch URL: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP Error: {}", resp.status()));
+    }
+    
+    let text = resp.text().await.map_err(|e| format!("Failed to read text: {}", e))?;
+    
+    // Quick regex to strip HTML tags and script/style content to save VRAM
+    let script_re = regex::Regex::new(r"(?is)<(script|style)[^>]*>.*?</\1>").unwrap();
+    let no_scripts = script_re.replace_all(&text, " ");
+    let tag_re = regex::Regex::new(r"(?is)<[^>]+>").unwrap();
+    let mut clean_text = tag_re.replace_all(&no_scripts, " ").into_owned();
+    
+    // Decode basic HTML entities
+    clean_text = clean_text.replace("&nbsp;", " ")
+                           .replace("&lt;", "<")
+                           .replace("&gt;", ">")
+                           .replace("&amp;", "&")
+                           .replace("&#39;", "'")
+                           .replace("&quot;", "\"");
+                           
+    // Remove multiple spaces and newlines
+    let space_re = regex::Regex::new(r"\s+").unwrap();
+    clean_text = space_re.replace_all(&clean_text, " ").trim().to_string();
+    
+    if clean_text.is_empty() {
+        return Err("Page was empty after stripping HTML.".to_string());
+    }
+    
+    // Hard limit to ~15,000 chars to avoid prompt overflow
+    if clean_text.len() > 15_000 {
+        clean_text.truncate(15_000);
+        clean_text.push_str("... [TRUNCATED]");
+    }
+    
+    Ok(clean_text)
 }

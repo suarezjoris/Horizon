@@ -35,6 +35,7 @@ mod code_preview;
 mod md_converter;
 mod plugins;
 mod metrics;
+mod mcp;
 
 fn main() {
     // WebKitGTK on Linux/NVIDIA stalls repaints (the UI only updates on window
@@ -42,6 +43,14 @@ fn main() {
     // webview initializes for a smooth UI. Linux-only; does not affect Windows.
     #[cfg(target_os = "linux")]
     std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+
+    let args: Vec<String> = std::env::args().collect();
+    if args.contains(&"--dump-tools".to_string()) {
+        let plugins = plugins::PluginRegistry::new();
+        let tools = tools::build_tool_definitions(false, &plugins);
+        println!("TOOLS_DUMP_START\n{}\nTOOLS_DUMP_END", serde_json::to_string_pretty(&tools).unwrap());
+        std::process::exit(0);
+    }
 
     tauri::Builder::default()
         .manage(app_state::ArmataState::new())
@@ -64,8 +73,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             settings::get_settings,
             settings::save_settings,
-            chat::chat,
             commands::reset_system,
+            commands::auto_consolidate_chat,
+            chat::chat,
             commands::list_ollama_models,
             commands::probe_model_capabilities,
             commands::list_personas,
@@ -86,7 +96,8 @@ fn main() {
             graphify::run_graphify,
             embeddings::reindex,
             commands::search_vault,
-            commands::get_note_decay_stats,
+            mcp::get_mcp_store,
+            mcp::toggle_mcp_server,
             file_reader::read_file_content,
             comfyui::check_comfyui,
             comfyui::spawn_comfyui,

@@ -74,17 +74,33 @@ impl VaultIndex {
     pub fn search(&self, query: &[f32], k: usize) -> Vec<SearchResult> {
         let (scores, ids) = self.inner.search(query, k);
         let mut results = Vec::new();
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
         for i in 0..ids.len() {
             if let Some(meta) = self.metadata.read().unwrap().get(&ids[i]) {
+                let days_since = f32::max(0.0, (now - meta.last_accessed) as f32 / 86400.0);
+                let decay_factor = (0.5_f32).powf(days_since / 30.0);
+                let final_score = scores[i] * (1.0 + (meta.access_count as f32 * 0.05)) * decay_factor;
                 results.push(SearchResult {
                     path: meta.path.clone(),
                     chunk: meta.chunk.clone(),
-                    score: scores[i],
+                    score: final_score,
                     id: ids[i],
                 });
             }
         }
+        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
         results
+    }
+
+    pub fn update_access_stats(&self, ids: &[u64]) {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        let mut meta_guard = self.metadata.write().unwrap();
+        for id in ids {
+            if let Some(meta) = meta_guard.get_mut(id) {
+                meta.access_count += 1;
+                meta.last_accessed = now;
+            }
+        }
     }
     
     pub fn save(&self, path: &str) -> Result<(), String> {
@@ -161,12 +177,61 @@ pub async fn reindex() -> Result<usize, String> {
     for rel_path in &notes {
         let Ok(content) = crate::vault::read_vault_note(&s.vault_path, rel_path) else { continue };
         let pinned = content.starts_with("---\n") && content.contains("pinned: true");
-        let chunks: Vec<String> = content
-            .split("\n\n")
-            .filter(|c| !c.trim().is_empty())
-            .map(|c| c.to_string())
-            .collect();
+        
+        let mut chunks = Vec::new();
+        let mut current_header = String::new();
+        let mut current_chunk = String::new();
+        
+        for line in content.lines() {
+            if line.starts_with('#') && line.contains(' ') {
+                let parts: Vec<&str> = line.splitn(2, ' ').collect();
+                if parts[0].chars().all(|c| c == '#') {
+                    current_header = line.to_string();
+                }
+            }
+            
+            if !current_chunk.is_empty() {
+                current_chunk.push('\n');
+            }
+            current_chunk.push_str(line);
+            
+            if current_chunk.len() >= 1000 {
+                let chunk_to_save = if !current_header.is_empty() && !current_chunk.starts_with(&current_header) {
+                    format!("{}\n{}", current_header, current_chunk)
+                } else {
+                    current_chunk.clone()
+                };
+                chunks.push(chunk_to_save);
+                
+                let overlap_size = 200;
+                if current_chunk.len() > overlap_size {
+                    let target = current_chunk.len() - overlap_size;
+                    let mut split_point = target;
+                    while split_point < current_chunk.len() && !current_chunk.is_char_boundary(split_point) {
+                        split_point += 1;
+                    }
+                    if let Some(next_space) = current_chunk[split_point..].find(|c: char| c.is_whitespace()) {
+                        current_chunk = current_chunk[split_point + next_space..].trim_start().to_string();
+                    } else {
+                        current_chunk = current_chunk[split_point..].trim_start().to_string();
+                    }
+                } else {
+                    current_chunk.clear();
+                }
+            }
+        }
+        
+        if !current_chunk.trim().is_empty() {
+            let chunk_to_save = if !current_header.is_empty() && !current_chunk.starts_with(&current_header) {
+                format!("{}\n{}", current_header, current_chunk)
+            } else {
+                current_chunk.clone()
+            };
+            chunks.push(chunk_to_save);
+        }
+
         if chunks.is_empty() { continue; }
+        
         let vectors = crate::ollama::embed(chunks.clone(), "nomic-embed-text:latest").await?;
         for (chunk, vector) in chunks.into_iter().zip(vectors) {
             new_index.add(&vector, ChunkMeta {
