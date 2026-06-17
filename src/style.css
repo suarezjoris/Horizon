@@ -13,33 +13,17 @@
 */
 
 /* ========================================================================
-   0. FONTS (bundled locally → works fully offline)
+   0. FONTS
    ======================================================================== */
-@font-face {
-  font-family: 'Cinzel';
-  src: url('fonts/cinzel-var-latin.woff2') format('woff2');
-  font-weight: 400 900;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'Inter';
-  src: url('fonts/inter-var-latin.woff2') format('woff2');
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* Global select reset — WebKitGTK ignores background unless appearance is removed */
+/* Global select reset */
 select {
   -webkit-appearance: none;
   appearance: none;
   background-color: var(--surface-light);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23D4A832' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
   padding-right: 32px !important;
   color: var(--text-main);
   border: var(--border-clay);
@@ -48,90 +32,79 @@ select {
   cursor: pointer;
 }
 select option {
-  background-color: #201408;
-  color: #EDE0C8;
+  background-color: var(--bg-deep);
+  color: var(--text-main);
 }
 
 /* ========================================================================
-   1. DESIGN TOKENS
+   1. DESIGN TOKENS (Portfolio DA: Dark Glassmorphism)
    ======================================================================== */
 :root {
-  /* — void & earth — */
-  --bg-deep:    #0C0804;   /* volcanic ash */
-  --bg-deeper:  #070503;   /* absolute void */
-  --bg-surface: #1C1208;   /* deep fired clay */
-  --surface:    #201408;   /* clay surface */
-  --surface-light: #301C0E; /* raised clay */
-  --surface-raised:#3E2614; /* top-level clay */
+  /* — void & surfaces — */
+  --bg-deep:    #080810;
+  --bg-deeper:  #050508;
+  --bg-surface: rgba(255, 255, 255, 0.04);
+  --surface:    rgba(255, 255, 255, 0.04);
+  --surface-light: rgba(255, 255, 255, 0.07);
+  --surface-raised: rgba(255, 255, 255, 0.09);
 
-  /* — parchment & stone text — */
-  --text-main: #EDE0C8;   /* aged parchment */
-  --text-dim:  #8A7560;   /* worn stone */
-  --text-faint:#5C4E3A;   /* deep dust */
+  /* — text — */
+  --text-main: #eeeef4;
+  --text-dim:  rgba(238, 238, 244, 0.52);
+  --text-faint: rgba(238, 238, 244, 0.28);
 
-  /* — sacred gold — */
-  --gold-bright:       #F0C840;
-  --gold-main:         #D4A832;
-  --gold-deep:         #9A7820;
-  --gold-glow:         rgba(212, 168, 50, 0.16);
-  --gold-glow-strong:  rgba(212, 168, 50, 0.40);
+  /* — accents (Blue & Green) — */
+  --gold-bright:       #3b82f6;
+  --gold-main:         #2563eb;
+  --gold-deep:         #1d4ed8;
+  --gold-glow:         rgba(37, 99, 235, 0.16);
+  --gold-glow-strong:  rgba(37, 99, 235, 0.40);
 
-  /* — warm accents — */
-  --terracotta:  #C05830;  /* fired clay red */
-  --amber:       #D07830;  /* torch amber */
-  --crimson:     #8B2018;  /* blood/conflict */
-  --ivory:       #F0E4D0;  /* divine ivory */
+  /* — warm accents remapped to UI states — */
+  --terracotta:  #ef4444;  /* error red */
+  --amber:       #f59e0b;  /* warning amber */
+  --crimson:     #b91c1c;  
+  --ivory:       #ffffff;  
 
-  /* — legacy aliases (used by inline HTML styles & JS) — */
+  /* — legacy aliases — */
   --accent-gold:        var(--gold-main);
   --accent-gold-strong: var(--gold-bright);
   --accent-copper:      var(--terracotta);
   --accent-copper-strong: var(--amber);
-  --accent-teal:        var(--amber);   /* repurposed: warm amber */
-  --border-color:       rgba(92, 62, 28, 0.65);
+  --accent-teal:        #22c55e;   /* repurposed: success green */
+  --border-color:       rgba(255, 255, 255, 0.07);
   --text-color:         var(--text-main);
-  --border-glass:       2px solid rgba(92, 62, 28, 0.55);
+  --border-glass:       1px solid rgba(255, 255, 255, 0.07);
 
-  /* — clay borders — */
-  --border-clay:  2px solid rgba(92, 62, 28, 0.65);
-  --border-gold:  2px solid rgba(212, 168, 50, 0.42);
-  --edge-sheen:   inset 0 2px 0 rgba(240, 200, 110, 0.10);
-  --edge-sheen-strong: inset 0 2px 0 rgba(240, 200, 110, 0.18);
+  /* — glass borders — */
+  --border-clay:  1px solid rgba(255, 255, 255, 0.07);
+  --border-gold:  1px solid rgba(37, 99, 235, 0.42);
+  --edge-sheen:   inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --edge-sheen-strong: inset 0 1px 0 rgba(255, 255, 255, 0.09);
 
-  /* — geometry (CLAYMORPHISM: ultra-rounded) — */
-  --radius-xl: 40px;
-  --radius-lg: 32px;
-  --radius-md: 22px;
-  --radius-sm: 14px;
+  /* — geometry (BENTO: 18px radii) — */
+  --radius-xl: 24px;
+  --radius-lg: 18px;
+  --radius-md: 14px;
+  --radius-sm: 10px;
 
-  /* — clay depth shadows (multi-layer 3D) — */
-  --shadow-clay:
-    0 20px 52px rgba(0, 0, 0, 0.78),
-    0 6px 16px  rgba(0, 0, 0, 0.48),
-    inset 0 2px 0 rgba(240, 200, 110, 0.10),
-    inset 0 -3px 0 rgba(0, 0, 0, 0.32);
-  --shadow-float:
-    0 32px 80px rgba(0, 0, 0, 0.88),
-    0 10px 26px rgba(0, 0, 0, 0.54),
-    inset 0 2px 0 rgba(240, 200, 110, 0.14),
-    inset 0 -4px 0 rgba(0, 0, 0, 0.38);
-  --shadow-press:
-    0 6px 18px  rgba(0, 0, 0, 0.65),
-    0 2px 6px   rgba(0, 0, 0, 0.40),
-    inset 0 2px 8px rgba(0, 0, 0, 0.42);
+  /* — glass depth shadows — */
+  --shadow-clay: 0 10px 48px rgba(0, 0, 0, 0.65);
+  --shadow-float: 0 30px 80px rgba(0, 0, 0, 0.55);
+  --shadow-press: 0 6px 18px rgba(0, 0, 0, 0.65);
 
   /* — motion — */
-  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-out:    cubic-bezier(0.22, 1, 0.36, 1);
-  --ease-soft:   cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: 0.38s cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-out:    0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-soft:   0.22s cubic-bezier(0.4, 0, 0.2, 1);
 
   /* — type — */
-  --font-body:    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-display: 'Cinzel', Georgia, 'Times New Roman', serif;
+  --font-body:    'Space Grotesk', sans-serif;
+  --font-display: 'Archivo', sans-serif;
 }
 
 /* ========================================================================
-   2. BODY + ANCIENT ATMOSPHERE
+   2. BODY + GLASSMORPHISM ATMOSPHERE
    ======================================================================== */
 body {
   background-color: var(--bg-deep);
@@ -143,59 +116,30 @@ body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  /* Torch-fire radiance: warm glow pockets from the left and right walls */
-  background-image:
-    radial-gradient(ellipse 130% 90% at 50% -18%,
-      rgba(190, 126, 28, 0.11) 0%,
-      rgba(130, 82, 16, 0.05) 50%,
-      transparent 80%
-    ),
-    radial-gradient(circle at 6% 38%,  rgba(200, 100, 20, 0.07) 0%, transparent 44%),
-    radial-gradient(circle at 94% 62%, rgba(180, 80, 14, 0.05) 0%, transparent 40%),
-    radial-gradient(ellipse at 50% 105%, rgba(80, 44, 8, 0.14) 0%, transparent 60%);
 }
 
-/* The Divine Disc — large solar emanation behind all content */
+/* Aurora Effect */
 body::before {
   content: '';
   position: fixed;
-  width: 88vw;
-  height: 88vw;
-  max-width: 960px;
-  max-height: 960px;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -58%);
-  border-radius: 50%;
-  pointer-events: none;
+  inset: 0;
   z-index: -2;
-  background: radial-gradient(
-    ellipse at center,
-    rgba(220, 150, 30, 0.065) 0%,
-    rgba(170, 108, 20, 0.040) 30%,
-    rgba(100, 62, 12, 0.020) 60%,
-    transparent 100%
-  );
-  /* subtle outer ring halo */
-  box-shadow:
-    0 0 0 1px rgba(212, 168, 50, 0.04),
-    0 0 0 2px rgba(212, 168, 50, 0.02);
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 70% 55% at 12% 20%, rgba(90, 60, 255, 0.14) 0%, transparent 65%),
+    radial-gradient(ellipse 55% 65% at 88% 80%, rgba(37, 99, 235, 0.1) 0%, transparent 65%),
+    radial-gradient(ellipse 55% 40% at 55% 5%, rgba(170, 35, 90, 0.07) 0%, transparent 60%);
 }
 
-/* Ash & ember motes — floating temple dust */
+/* Noise Overlay */
 body::after {
   content: '';
   position: fixed;
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  opacity: 0.38;
-  background-image:
-    radial-gradient(circle, rgba(212, 168, 50, 0.65) 0, transparent 1.5px),
-    radial-gradient(circle, rgba(200, 110, 40, 0.55) 0, transparent 1.2px),
-    radial-gradient(circle, rgba(255, 220, 140, 0.45) 0, transparent 1.0px);
-  background-size: 200px 200px, 330px 330px, 155px 155px;
-  background-position: 0 0, 80px 100px, 40px 60px;
+  opacity: 0.022;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 /* Keyframe library */
@@ -2125,4 +2069,18 @@ body::after {
 .sparkline {
   background: rgba(255,255,255,0.05);
   border-radius: 2px;
+}
+
+/* ========================================================================
+   APPLY GLASSMORPHISM BACKDROP FILTER TO MAJOR PANELS
+   ======================================================================== */
+#chat-history, #chat-input-wrapper, #settings-panel, #help-panel,
+.image-sidebar, .image-viewport, #image-grid,
+.cinema-sidebar, #video-feed,
+.note-sidebar, .note-content,
+.armata-sidebar, .armata-content,
+.modal-box, #diagnostic-box, #onboarding-box,
+#hub-proposal-banner, .toast {
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
 }
