@@ -20,6 +20,8 @@ mod memory;
 mod office;
 mod ollama;
 mod openclaude;
+mod ide_agent;
+mod pty;
 
 mod pyenv;
 mod search;
@@ -56,6 +58,8 @@ fn main() {
         .manage(app_state::ArmataState::new())
         .manage(vram_queue::VramQueue::new())
         .manage(metrics::MetricsState::new())
+        .manage(ide_agent::IdeState::default())
+        .manage(pty::PtyState::default())
         .manage({
             let settings = settings::load();
             let mut registry = plugins::PluginRegistry::new();
@@ -134,6 +138,12 @@ fn main() {
             plugins::list_ui_plugins,
             plugins::get_plugin_html,
             plugins::reload_plugins,
+            ide_agent::send_ide_prompt,
+            ide_agent::clear_ide_memory,
+            ide_agent::execute_ide_script,
+            pty::spawn_pty,
+            pty::pty_write,
+            pty::pty_resize,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

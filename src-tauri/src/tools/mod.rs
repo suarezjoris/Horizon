@@ -8,24 +8,31 @@ fn floor_char_boundary(s: &str, index: usize) -> usize {
 }
 
 pub fn safe_join(workspace: &Path, requested: &Path) -> Result<PathBuf, String> {
-    if requested.is_absolute() {
-        return Err("Access denied: absolute path not allowed".into());
-    }
-    let mut result = workspace.to_path_buf();
+    let mut result = if requested.is_absolute() {
+        PathBuf::new()
+    } else {
+        workspace.to_path_buf()
+    };
+    
     for component in requested.components() {
         match component {
             Component::Normal(c) => result.push(c),
             Component::ParentDir => { result.pop(); }
             Component::CurDir => {}
             Component::RootDir | Component::Prefix(_) => {
-                return Err("Access denied: absolute component in path".into());
+                if requested.is_absolute() {
+                    result.push(component);
+                } else {
+                    return Err("Access denied: absolute component in relative path".into());
+                }
             }
         }
     }
+    
     if result.starts_with(workspace) {
         Ok(result)
     } else {
-        Err("Access denied: path escapes workspace".into())
+        Err(format!("Access denied: path escapes workspace (resolved to {:?})", result))
     }
 }
 
@@ -123,12 +130,14 @@ pub async fn bash(workspace: &Path, command: &str) -> Result<String, String> {
     }
 
     let ws_str = workspace.to_string_lossy();
-    let output = tokio::process::Command::new("bwrap")
+    let future = tokio::process::Command::new("bwrap")
         .args([
             "--bind",        &ws_str, &ws_str,
             "--ro-bind",     "/usr",  "/usr",
             "--ro-bind",     "/lib",  "/lib",
             "--ro-bind",     "/lib64","/lib64",
+            "--ro-bind",     "/etc",  "/etc",
+            "--dev",         "/dev",
             "--tmpfs",       "/tmp",
             "--proc",        "/proc",
             "--unshare-net",
@@ -139,9 +148,14 @@ pub async fn bash(workspace: &Path, command: &str) -> Result<String, String> {
             "bash", "-c", command,
         ])
         .current_dir(workspace)
-        .output()
-        .await
-        .map_err(|e| format!("bwrap spawn failed: {}", e))?;
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .output();
+
+    let output = match tokio::time::timeout(std::time::Duration::from_secs(60), future).await {
+        Ok(res) => res.map_err(|e| format!("bwrap spawn failed: {}", e))?,
+        Err(_) => return Err("Command timed out after 60 seconds".into()),
+    };
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);

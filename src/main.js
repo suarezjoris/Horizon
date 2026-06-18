@@ -23,6 +23,10 @@ function switchTab(name) {
   if (name === 'notes' && window.onNotesTabActive) {
     window.onNotesTabActive();
   }
+
+  if (name === 'ide' && window.onIdeTabActive) {
+    window.onIdeTabActive();
+  }
 }
 
 // Share project path between modules

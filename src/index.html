@@ -72,6 +72,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
       <span>Armata</span>
     </div>
+    <div class="tab" data-tab="ide">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+      <span>IDE</span>
+    </div>
   </div>
   <div id="sidebar-actions" style="display: flex; gap: 8px;">
     <div id="help-btn" title="Cheatsheet & Help">
@@ -350,6 +354,25 @@
   </div>
 </div>
 
+<div class="panel" id="panel-ide">
+  <div id="ide-chat-history">
+    <div class="ide-message ide-message-system">[System] Agentic IDE ready. I can read, write, and execute code directly in your workspace.</div>
+  </div>
+  
+  <div id="ide-input-area" class="unified-input-area">
+    <div id="ide-status-bar">
+      <span id="ide-status-indicator">💤 Idle</span>
+      <span id="ide-model-indicator">🤖 Selecting Model</span>
+    </div>
+    <div class="ide-input-wrapper">
+      <textarea id="ide-chat-input" rows="1" placeholder="Describe your coding task..."></textarea>
+      <button id="ide-send-btn" onclick="window.ideSendPrompt()">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
 <div id="help-overlay" class="overlay">
   <div id="help-panel">
     <h3 style="color: var(--accent-gold); margin-bottom: 15px; margin-top: 0;">Cheatsheet & AI Technologies</h3>
@@ -454,6 +477,7 @@
       <!-- Interactive mask drawing layer -->
       <canvas id="inpaint-mask-interactive" style="position: absolute;"></canvas>
     </div>
+    
     <div id="inpaint-controls">
       <label>🖌 Brush Size</label>
       <input type="range" id="inpaint-brush-size" min="5" max="150" value="40">
@@ -484,6 +508,7 @@
 <script src="modules/armata.js"></script>
 <script src="modules/onboarding.js"></script>
 <script src="modules/slash_commands.js"></script>
+<script src="modules/ide.js"></script>
 <script src="main.js"></script>
 </body>
 </html>
