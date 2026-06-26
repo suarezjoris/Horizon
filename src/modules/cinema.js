@@ -85,9 +85,9 @@
             gpuText.textContent = `GPU: ${Math.round(stats.load)}%`;
             
             // Adjust bar color based on load
-            if (stats.load > 80) gpuFill.style.background = '#ff5f57';
-            else if (stats.load > 50) gpuFill.style.background = 'var(--accent-gold)';
-            else gpuFill.style.background = 'var(--accent-teal)';
+            if (stats.load > 80) gpuFill.style.background = 'var(--orange)';
+            else if (stats.load > 50) gpuFill.style.background = 'var(--signal)';
+            else gpuFill.style.background = 'var(--carbon)';
             
         } catch (e) {
             // Probably no nvidia-smi

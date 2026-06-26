@@ -13,10 +13,8 @@ pub async fn chat(
     let _permit = vram_queue.acquire("LLM Chat").await?;
     let s = settings::load();
 
-    // Choose model: override > settings default
     let active_model = model.unwrap_or(s.llm_model.clone());
 
-    // Latest user message — used by the web-search guard, the 2nd-pass prompt, and memory extraction.
     let user_msg = messages
         .iter()
         .rev()
@@ -25,14 +23,11 @@ pub async fn chat(
         .unwrap_or("")
         .to_string();
 
-
-
-    // RAG: pull the most relevant vault chunks using emergent brain logic
     let context = memory::get_context(&user_msg).await;
 
-    // Load Persona / System Prompt
     let system_base = persona.and_then(|name| {
-        // SECURITY FIX (Vuln 3): Prevent path traversal by sanitizing the persona name
+        // Prevent path traversal in persona name
+
         let safe_name = name.replace("/", "").replace("\\", "").replace("..", "");
         let vault_path = std::path::PathBuf::from(&s.vault_path);
         let md = vault_path.join(format!("characters/{}.md", safe_name));
@@ -41,7 +36,6 @@ pub async fn chat(
         std::fs::read_to_string(md).ok().or_else(|| std::fs::read_to_string(json).ok())
     }).unwrap_or_else(|| "You are Horizon, a premium UNCENSORED creative engine.".to_string());
 
-    // 0. Construct System Prompt
     let system = build_system_prompt(&system_base, &context);
 
     const MAX_TOOL_CALLS: usize = 10;
@@ -52,7 +46,6 @@ pub async fn chat(
             .map(|c| c.tool_calling)
             .unwrap_or(false);
 
-    // Build messages with appropriate system prompt
     let agent_system = if use_tools {
         build_agent_system_prompt(&system_base, &context)
     } else {
@@ -63,12 +56,12 @@ pub async fn chat(
     current_messages.extend(messages.clone());
 
     if use_tools {
-        // === BOUCLE AGENTIQUE V4 ===
         let workspace_path = s.agent_workspace.clone();
         let workspace = std::path::Path::new(&workspace_path);
         let include_bash = cfg!(target_os = "linux");
         let plugin_registry = plugin_state.read().await;
-        let tool_defs = tools::build_tool_definitions(include_bash, &*plugin_registry);        let ollama_tools: Vec<ollama::Tool> = tool_defs.iter().map(|t| {
+        let tool_defs = tools::build_tool_definitions(include_bash, &*plugin_registry);
+        let ollama_tools: Vec<ollama::Tool> = tool_defs.iter().map(|t| {
             ollama::Tool {
                 r#type: "function".into(),
                 function: ollama::ToolFunction {
@@ -203,7 +196,6 @@ pub async fn chat(
                     }
                 }
             } else if let Some(ref content) = agent_msg.content {
-                // Check for malformed tool call smuggled as plain text
                 let looks_like_bad_tool_call = content.trim_start().starts_with('{')
                     && (content.contains("\"name\"") || content.contains("tool_call"))
                     && !content.contains('\n');
@@ -222,7 +214,6 @@ pub async fn chat(
                     continue;
                 }
 
-                // Final text response — pass as llm-done payload so frontend renders markdown
                 let final_text = content.clone();
                 let _ = app.emit("llm-done", &final_text);
 
@@ -240,7 +231,6 @@ pub async fn chat(
             }
         }
     } else {
-        // === FALLBACK LEGACY (tag-based) ===
         let mut final_response = String::new();
         let mut iteration = 0;
         const MAX_ITERATIONS: usize = 3;

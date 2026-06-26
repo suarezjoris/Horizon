@@ -12,7 +12,6 @@ let streamingBubble = null;
 let unlistenToken = null;
 let unlistenDone = null;
 
-// Model Router indicator
 listen('model-routed', (event) => {
   const { classification, model } = event.payload;
   const modelShort = model.split(':')[0].split('/').pop();
@@ -20,11 +19,12 @@ listen('model-routed', (event) => {
   const indicator = document.createElement('div');
   indicator.className = 'route-indicator';
   indicator.style.cssText = `
-    text-align: center; padding: 4px 12px; margin: 4px 0;
-    font-size: 11px; border-radius: 12px; opacity: 0.7;
-    background: ${isComplex ? 'rgba(255,140,0,0.15)' : 'rgba(0,200,100,0.15)'};
-    color: ${isComplex ? '#ffaa44' : '#44ddaa'};
-    border: 1px solid ${isComplex ? 'rgba(255,140,0,0.25)' : 'rgba(0,200,100,0.25)'};
+    align-self: center; text-align: center; padding: 4px 12px; margin: 4px 0;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    background: ${isComplex ? '#FF4D0F' : '#E8FF00'};
+    color: #111110;
+    border: 2px solid #111110;
   `;
   indicator.textContent = `${isComplex ? '🧠 Heavy' : '⚡ Fast'} → ${modelShort}`;
   history.appendChild(indicator);
@@ -146,9 +146,7 @@ window.handleLLMDropFiles = async (files) => {
       for (const file of files) {
         const content = await invoke('read_file_content', { path: file });
         if (content.type === "Image") {
-           // wait, we will use read_file_content returning FileContent
            attachedFilesText += `\n\n--- Image Attached ---\n[Base64 Image Data - Hidden]\n---\n`;
-           // To be implemented: sending image to llm if vision model. But for now text is returned.
         }
         
         let textContent = content.data || content; // support old and new formats
@@ -206,7 +204,6 @@ async function send() {
       .catch(e => console.error('Auto-consolidation failed', e));
   }
   
-  // Handle Commands
   if (llmText.startsWith('/')) {
     const [cmd, ...args] = llmText.slice(1).split(' ');
     const query = args.join(' ');
@@ -260,13 +257,11 @@ async function send() {
     if (cmd === 'docx' || cmd === 'word') {
       addBubble('user', `Generating Word document: ${query}`);
       messages.push({ role: 'user', content: `GENERATE_DOCX for: ${query}. Use search if needed for factual accuracy.` });
-      // Let the normal send logic handle it from here
     }
 
     if (cmd === 'xlsx' || cmd === 'excel') {
       addBubble('user', `Generating Excel file: ${query}`);
       messages.push({ role: 'user', content: `GENERATE_XLSX for: ${query}.` });
-      // Let the normal send logic handle it from here
     }
 
     if (cmd === 'wiki' || cmd === 'learn_wiki') {
@@ -284,9 +279,76 @@ async function send() {
     }
 
     if (cmd === 'ppt' || cmd === 'pptx' || cmd === 'powerpoint') {
-      addBubble('user', `Generating PowerPoint: ${query}`);
-      messages.push({ role: 'user', content: `GENERATE_PPTX for: ${query}. Use search for depth and accuracy.` });
-      // Let the normal send logic handle it from here
+      addBubble('user', `Création d'une présentation : ${query}`);
+      messages.push({ role: 'user', content: `/pptx ${query}` });
+      
+      const aiBubble = addBubble('ai', '🎨 Analyse de votre demande et recherche de designs premium en cours...');
+      aiBubble.classList.add('streaming');
+      
+      (async () => {
+          try {
+              const keywords = await invoke('analyze_pptx_request', { prompt: query });
+              aiBubble.textContent = `Thème identifié : ${keywords}. Recherche de templates...`;
+
+              const templates = await invoke('scrape_pptx_templates', { query: keywords });
+              
+              aiBubble.classList.remove('streaming');
+              aiBubble.innerHTML = `Voici quelques styles pour votre document, lequel préférez-vous ?<br><div class="template-carousel"></div>`;
+              const carousel = aiBubble.querySelector('.template-carousel');
+              
+              templates.forEach(tpl => {
+                  const card = document.createElement('div');
+                  card.className = 'template-card';
+                  const img = document.createElement('img');
+                  img.src = tpl.thumbnail_url;
+                  img.alt = tpl.title;
+                  const info = document.createElement('div');
+                  info.className = 'template-info';
+                  const titleDiv = document.createElement('div');
+                  titleDiv.className = 'template-title';
+                  titleDiv.textContent = tpl.title;
+                  const sourceDiv = document.createElement('div');
+                  sourceDiv.className = 'template-source';
+                  sourceDiv.textContent = tpl.source;
+                  info.append(titleDiv, sourceDiv);
+                  card.append(img, info);
+                  card.onclick = async () => {
+                      aiBubble.replaceChildren();
+                      const genStrong = document.createElement('strong');
+                      genStrong.textContent = tpl.title;
+                      aiBubble.append('Génération de la structure et injection XML native dans le style ', genStrong, '... Cela prend environ une minute.');
+                      aiBubble.classList.add('streaming');
+
+                      try {
+                          const finalPath = await invoke('execute_pptx_generation', { prompt: query, templateUrl: tpl.download_url });
+                          aiBubble.classList.remove('streaming');
+                          const filename = finalPath.split('/').pop().split('\\').pop();
+                          aiBubble.replaceChildren();
+                          const magicStrong = document.createElement('strong');
+                          magicStrong.textContent = 'Magie opérée !';
+                          const fileCode = document.createElement('code');
+                          fileCode.textContent = filename;
+                          const openBtn = document.createElement('button');
+                          openBtn.className = 'office-gen-btn';
+                          openBtn.textContent = '📂 Ouvrir le document';
+                          openBtn.onclick = () => window.__TAURI__.core.invoke('open_docs_folder');
+                          aiBubble.append('✨ ', magicStrong, document.createElement('br'), 'Votre présentation ', fileCode, ' a été générée en un éclair.', document.createElement('br'), document.createElement('br'), openBtn);
+                      } catch (e) {
+                          aiBubble.classList.remove('streaming');
+                          aiBubble.textContent = `❌ Erreur lors de la génération : ${e}`;
+                      }
+                  };
+                  carousel.appendChild(card);
+              });
+          } catch (e) {
+              aiBubble.classList.remove('streaming');
+              aiBubble.textContent = `Erreur : ${e}`;
+          }
+      })();
+      
+      input.value = '';
+      input.style.height = 'auto';
+      return;
     }
 
     if (cmd === 'search') {
@@ -362,7 +424,6 @@ async function send() {
   if (unlistenToken) { await unlistenToken(); unlistenToken = null; }
   if (unlistenDone)  { await unlistenDone();  unlistenDone = null; }
 
-  // Agent V4 event handlers
   let unlistenThinking, unlistenToolStart, unlistenToolDone, unlistenToolError;
   let activeToolArgs = null;
   const cleanupAgentListeners = async () => {
@@ -388,7 +449,6 @@ async function send() {
   unlistenToolDone = await listen('agent-tool-done', e => {
     const { tool, result, ms } = e.payload;
     if (tool === 'edit_file' && activeToolArgs) {
-        // Render diff preview
         const { search, replace } = activeToolArgs;
         renderDiffPreview(streamingBubble, activeToolArgs.path, search, replace);
     }
@@ -415,7 +475,6 @@ async function send() {
         return;
     }
 
-    // Detect document generation success in stream and provide a button
     if (e.payload.startsWith("OFFICE_GEN_SUCCESS:")) {
         const path = e.payload.split("OFFICE_GEN_SUCCESS:")[1];
         const filename = path.split('/').pop().split('\\').pop();
@@ -424,9 +483,9 @@ async function send() {
         streamingBubble.innerHTML = DOMPurify.sanitize(marked.parse(accumulatedText));
         
         const btn = document.createElement('button');
-        btn.innerHTML = "📂 Ouvrir le dossier documents";
+        btn.textContent = "📂 Ouvrir le dossier documents";
         btn.className = "office-gen-btn";
-        btn.style = "margin-top: 15px; display: block; background: var(--accent-gold-strong); color: #000; border: none; padding: 10px 16px; border-radius: 12px; cursor: pointer; font-size: 12px; font-weight: 800; box-shadow: 0 4px 15px rgba(212,175,55,0.3); transition: all 0.2s;";
+        btn.style = "margin-top: 15px; display: block; background: var(--signal,#E8FF00); color: #111110; border: 2px solid #111110; padding: 10px 16px; cursor: pointer; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; clip-path: polygon(0 0,100% 0,100% calc(100% - 9px),calc(100% - 9px) 100%,0 100%); transition: transform 0.2s, box-shadow 0.2s;";
         btn.onclick = () => invoke('open_docs_folder');
         streamingBubble.appendChild(btn);
         return;
@@ -452,7 +511,6 @@ async function send() {
     await unlistenDone();  unlistenDone = null;
     await cleanupAgentListeners();
 
-    // Cross-module trigger: switch to Image tab if LLM requests image generation
     const match = fullMsg.match(/GENERATE_IMAGE:(.+)/);
     if (match) {
       const prompt = match[1].trim();
@@ -461,15 +519,13 @@ async function send() {
         const promptEl = document.getElementById('image-prompt');
         if (promptEl) {
           promptEl.value = prompt;
-          // VULN-007 Fix: We no longer auto-trigger window.triggerImageGeneration() 
-          // The user must explicitly click the 'Generate' button to confirm.
+          // Don't auto-trigger generation — user must confirm by clicking Generate.
         }
       }
     }
   });
 
   try {
-    // SCALE-001 Fix: Limit context window to last 15 messages
     const trimmedMessages = messages.slice(-15);
     const model = modelSelect.value || null;
     const persona = personaSelect.value || null;
@@ -481,8 +537,6 @@ async function send() {
     await cleanupAgentListeners();
   }
 }
-
-
 
 
 sendBtn.addEventListener('click', send);
@@ -525,7 +579,6 @@ if (exportPdfBtn) {
   });
 }
 
-// --- Pax banner (non-chat triggers: startup, forge, workspace) ---
 let pendingPaxBannerQuestion = null;
 
 listen('pax-banner', (event) => {
@@ -540,7 +593,7 @@ document.getElementById('pax-banner-open')?.addEventListener('click', () => {
     if (!pendingPaxBannerQuestion) return;
     switchTab('llm');
     addBubble('ai', pendingPaxBannerQuestion);
-    pendingPaxQuestion = pendingPaxBannerQuestion; // inject as context on next user send
+    pendingPaxQuestion = pendingPaxBannerQuestion;
     history.scrollTop = history.scrollHeight;
     pendingPaxBannerQuestion = null;
 });
@@ -550,7 +603,6 @@ document.getElementById('pax-banner-dismiss')?.addEventListener('click', () => {
     pendingPaxBannerQuestion = null;
 });
 
-// --- Code Execution Preview ---
 function isRunnable(lang) {
     return ['python', 'python3', 'bash', 'sh', 'javascript', 'js', 'node', 'rust'].includes(lang.toLowerCase());
 }
@@ -630,15 +682,19 @@ function renderDiffPreview(streamingBubble, path, search, replace) {
     
     const diffBubble = document.createElement('div');
     diffBubble.className = 'bubble ai diff-preview';
-    diffBubble.innerHTML = `<strong>File Edited: <code>${path}</code></strong>`;
+    const diffHeader = document.createElement('strong');
+    diffHeader.append('File Edited: ');
+    const pathCode = document.createElement('code');
+    pathCode.textContent = path;
+    diffHeader.appendChild(pathCode);
+    diffBubble.appendChild(diffHeader);
     
     const diffPanel = document.createElement('div');
     diffPanel.className = 'diff-panel';
     
     const searchLines = (search || '').split('\n');
     const replaceLines = (replace || '').split('\n');
-    
-    // Simple line-by-line diff display
+
     searchLines.forEach(line => {
         const div = document.createElement('div');
         div.className = 'diff-line diff-removed';
@@ -655,8 +711,7 @@ function renderDiffPreview(streamingBubble, path, search, replace) {
     
     diffBubble.appendChild(diffPanel);
     row.append(avatar, diffBubble);
-    
-    // Insert before the streaming bubble's row
+
     const streamRow = streamingBubble.parentElement;
     streamRow.parentElement.insertBefore(row, streamRow);
 }

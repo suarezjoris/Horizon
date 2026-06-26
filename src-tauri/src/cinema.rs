@@ -53,7 +53,7 @@ pub async fn generate_video(
     let _permit = vram_queue.acquire("Cinema Video").await?;
     
     // 1. Unload LLM
-    let _ = crate::ollama::unload(&s.llm_model).await;
+    crate::ollama::unload().await?;
 
     // 2. Load workflow
     let workflow_name = if image_path.is_some() { "comfyui-i2v-workflow.json" } else { "comfyui-t2v-workflow.json" };

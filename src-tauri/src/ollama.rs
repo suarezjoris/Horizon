@@ -116,11 +116,42 @@ pub async fn chat_once(
         }))
         .send()
         .await
-        .map_err(|e| e.to_string())?
-        .json::<serde_json::Value>()
+        .map_err(|e| e.to_string())?;
+        
+    let status = resp.status();
+    let json_resp = resp.json::<serde_json::Value>().await.map_err(|e| e.to_string())?;
+    
+    if let Some(err) = json_resp.get("error").and_then(|e| e.as_str()) {
+        return Err(format!("Ollama API Error ({}): {}", status, err));
+    }
+    
+    Ok(json_resp["message"]["content"].as_str().unwrap_or("").to_string())
+}
+
+pub async fn chat_once_json(
+    messages: Vec<serde_json::Value>,
+    model: &str,
+) -> Result<String, String> {
+    let resp = HTTP_CLIENT
+        .post("http://localhost:11434/api/chat")
+        .json(&serde_json::json!({
+            "model": model,
+            "messages": messages,
+            "stream": false,
+            "format": "json"
+        }))
+        .send()
         .await
         .map_err(|e| e.to_string())?;
-    Ok(resp["message"]["content"].as_str().unwrap_or("").to_string())
+        
+    let status = resp.status();
+    let json_resp = resp.json::<serde_json::Value>().await.map_err(|e| e.to_string())?;
+    
+    if let Some(err) = json_resp.get("error").and_then(|e| e.as_str()) {
+        return Err(format!("Ollama API Error ({}): {}", status, err));
+    }
+    
+    Ok(json_resp["message"]["content"].as_str().unwrap_or("").to_string())
 }
 
 /// Describe an image using moondream:latest
@@ -260,14 +291,75 @@ pub async fn list_models() -> Result<Vec<String>, String> {
 }
 
 /// Unload the active model from VRAM (sets keep_alive to 0).
-pub async fn unload(model: &str) -> Result<(), String> {
-    let _ = HTTP_CLIENT
+#[derive(Deserialize)]
+struct PsResponse {
+    models: Vec<PsModel>,
+}
+
+#[derive(Deserialize)]
+struct PsModel {
+    model: String,
+    #[serde(default)]
+    size_vram: u64,
+}
+
+/// Models currently held in memory by Ollama, with their VRAM usage.
+async fn list_loaded() -> Result<Vec<PsModel>, String> {
+    let resp = HTTP_CLIENT
+        .get("http://localhost:11434/api/ps")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json::<PsResponse>()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(resp.models)
+}
+
+/// Tell Ollama to drop a single model from memory immediately.
+async fn unload_one(model: &str) -> Result<(), String> {
+    HTTP_CLIENT
         .post("http://localhost:11434/api/generate")
         .json(&serde_json::json!({ "model": model, "keep_alive": 0 }))
         .send()
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Free ALL VRAM held by Ollama before a GPU job (image/video gen).
+///
+/// Unloads every resident model — not just the chat model — then polls
+/// /api/ps until no model holds VRAM. CUDA context teardown is async, so
+/// `keep_alive: 0` returns before the memory is actually released; starting
+/// ComfyUI before that point overcommits the GPU and can hang the driver.
+///
+/// Returns Err if VRAM is still held after ~10s so the caller can refuse to
+/// start the job. If Ollama is unreachable there is nothing to free, so this
+/// succeeds.
+pub async fn unload() -> Result<(), String> {
+    let loaded = match list_loaded().await {
+        Ok(m) => m,
+        Err(_) => return Ok(()), // Ollama not running — no VRAM to free
+    };
+
+    for m in &loaded {
+        if m.size_vram > 0 {
+            let _ = unload_one(&m.model).await;
+        }
+    }
+
+    // Poll until VRAM is actually released, or give up after ~10s.
+    for _ in 0..50 {
+        match list_loaded().await {
+            Ok(models) if models.iter().all(|m| m.size_vram == 0) => return Ok(()),
+            Ok(_) => {}
+            Err(_) => return Ok(()), // Ollama went away — nothing holds VRAM
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+
+    Err("Ollama VRAM not freed after 10s; aborting GPU job to avoid overcommit".to_string())
 }
 
 pub async fn get_model_hash(model: &str) -> Result<String, String> {

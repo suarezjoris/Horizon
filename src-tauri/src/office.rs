@@ -74,6 +74,7 @@ pub struct PdfContent {
 
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
+#[allow(dead_code)]
 pub enum PdfElement {
     Heading { level: u8, text: String },
     Paragraph { text: String, bold: Option<bool>, italic: Option<bool> },
@@ -217,41 +218,29 @@ pub async fn generate_pptx(content: PptxContent) -> Result<String, String> {
     let filename = if safe_filename.ends_with(".pptx") { safe_filename } else { format!("{}.pptx", safe_filename) };
     let output_path = base_path.join(&filename);
     
-    let mut data = serde_json::to_value(&content).map_err(|e| e.to_string())?;
-    data["output_path"] = serde_json::json!(output_path.to_string_lossy());
-    
     // Check for master template (priority: arg > assets > documents)
-    let explicit_template = content.template.as_ref().map(|t| PathBuf::from(&s.vault_path).join("templates/pptx").join(format!("{}.pptx", t)));
+    let explicit_template = content.template.as_ref().map(|t| {
+        let safe_t = std::path::Path::new(t)
+            .file_name()
+            .unwrap_or(std::ffi::OsStr::new("default"))
+            .to_string_lossy()
+            .into_owned();
+        PathBuf::from(&s.vault_path).join("templates/pptx").join(format!("{}.pptx", safe_t))
+    });
     let master_template = PathBuf::from(&s.vault_path).join("assets/template.pptx");
     let user_template = base_path.join("template.pptx");
     
-    if let Some(et) = explicit_template {
-        if et.exists() {
-            data["template_path"] = serde_json::json!(et.to_string_lossy());
-        }
+    let template_to_use = if let Some(et) = explicit_template {
+        if et.exists() { Some(et) } else { None }
     } else if master_template.exists() {
-        data["template_path"] = serde_json::json!(master_template.to_string_lossy());
+        Some(master_template)
     } else if user_template.exists() {
-        data["template_path"] = serde_json::json!(user_template.to_string_lossy());
-    }
+        Some(user_template)
+    } else {
+        None
+    };
 
-    let home = dirs::home_dir().ok_or("Could not find home directory")?;
-    let project_root = home.join("Projects/Horizon");
-    
-    let python_path = project_root.join(".venv/bin/python3");
-    let script_path = project_root.join("src-tauri/src/pptx_gen.py");
-
-    let output = std::process::Command::new(python_path)
-        .arg(script_path)
-        .arg(serde_json::to_string(&data).unwrap())
-        .output()
-        .map_err(|e| format!("Failed to run PPTX generator: {}", e))?;
-
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).to_string());
-    }
-
-    Ok(output_path.to_string_lossy().to_string())
+    crate::pptx_native::generate_pptx_native_sync(&content, template_to_use, output_path.clone())
 }
 
 #[tauri::command]

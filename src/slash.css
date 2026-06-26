@@ -4,15 +4,13 @@
   left: 20px;
   width: 300px;
   max-height: 250px;
-  background: rgba(15, 15, 20, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  backdrop-filter: blur(10px);
+  background: var(--surface-light, #f0eee6);
+  border: 2px solid var(--carbon, #111110);
   overflow-y: auto;
   z-index: 1000;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
+  box-shadow: 5px 5px 0 var(--carbon, #111110);
 }
 
 #slash-commands-popup.hidden {
@@ -22,8 +20,8 @@
 .slash-command-item {
   padding: 10px 15px;
   cursor: pointer;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  transition: background 0.2s, transform 0.1s;
+  border-bottom: 2px solid var(--carbon, #111110);
+  transition: background 0.15s, transform 0.1s;
 }
 
 .slash-command-item:last-child {
@@ -32,18 +30,22 @@
 
 .slash-command-item:hover,
 .slash-command-item.selected {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--signal, #E8FF00);
   transform: translateX(4px);
 }
 
 .slash-command-name {
-  color: var(--accent-gold);
-  font-weight: bold;
-  font-size: 14px;
+  color: var(--carbon, #111110);
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 13px;
   margin-bottom: 2px;
 }
 
 .slash-command-desc {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-dim, #54524a);
   font-size: 12px;
+  font-weight: 500;
 }

@@ -50,6 +50,15 @@
   </div>
 </div>
 
+<div id="hud-rail">
+  <span class="hud-tick">◢◤</span>
+  <span class="hud-name">&ldquo;HORIZON&rdquo; — JS_BRAND_SYSTEM</span>
+  <span class="hud-fill"></span>
+  <span>v1.0</span>
+  <span class="hud-alert">OFF-WHITE × MARATHON</span>
+  <span class="hud-tick">◢◤</span>
+</div>
+
 <div id="tab-bar">
   <div id="tab-inner">
     <div class="tab active" data-tab="llm">
@@ -88,14 +97,14 @@
 </div>
 
 <!-- Hub Proposal Banner (shown by Forge when a new topic cluster is detected) -->
-<div id="hub-proposal-banner" style="display:none; position:fixed; bottom:80px; right:20px; z-index:9999; background:var(--bg-card,#1e1e2e); border:1px solid var(--accent-gold,#d4af37); border-radius:14px; padding:16px 20px; max-width:340px; box-shadow:0 8px 32px rgba(0,0,0,0.5);">
-  <div style="font-size:12px; color:var(--accent-gold,#d4af37); font-weight:700; margin-bottom:6px;">🗂️ FORGE DETECTED NEW TOPIC</div>
-  <div id="hub-proposal-name" style="font-size:16px; font-weight:800; color:#fff; margin-bottom:4px;"></div>
-  <div id="hub-proposal-desc" style="font-size:12px; color:rgba(255,255,255,0.6); margin-bottom:8px;"></div>
-  <div id="hub-proposal-keywords" style="font-size:11px; color:rgba(255,255,255,0.4); margin-bottom:12px;"></div>
+<div id="hub-proposal-banner" style="display:none; position:fixed; bottom:80px; right:20px; z-index:9999; background:var(--surface,#E8E6DD); border:2px solid var(--carbon,#111110); padding:16px 20px; max-width:340px; box-shadow:5px 5px 0 var(--carbon,#111110);">
+  <div class="mono" style="font-size:10px; color:var(--label-orange,#c43a0c); font-weight:700; letter-spacing:0.16em; text-transform:uppercase; margin-bottom:6px;">// FORGE DETECTED NEW TOPIC</div>
+  <div id="hub-proposal-name" class="wide" style="font-size:18px; color:var(--carbon,#111110); margin-bottom:4px;"></div>
+  <div id="hub-proposal-desc" style="font-size:12px; color:var(--text-dim,#54524a); margin-bottom:8px; font-weight:500;"></div>
+  <div id="hub-proposal-keywords" class="mono" style="font-size:10px; color:var(--text-faint,#8a897d); letter-spacing:0.08em; margin-bottom:12px;"></div>
   <div style="display:flex; gap:8px;">
-    <button id="hub-proposal-confirm" style="flex:1; background:var(--accent-gold,#3b82f6); color:#fff; border:none; padding:8px; border-radius:8px; font-weight:800; cursor:pointer;">Create Hub</button>
-    <button id="hub-proposal-dismiss" style="flex:1; background:rgba(255,255,255,0.08); color:#fff; border:none; padding:8px; border-radius:8px; cursor:pointer;">Dismiss</button>
+    <button id="hub-proposal-confirm" class="mono cut" style="flex:1; background:var(--signal,#E8FF00); color:var(--carbon,#111110); border:2px solid var(--carbon,#111110); padding:8px; font-weight:800; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; cursor:pointer;">Create Hub</button>
+    <button id="hub-proposal-dismiss" class="mono" style="flex:1; background:var(--surface-light,#f0eee6); color:var(--carbon,#111110); border:2px solid var(--carbon,#111110); padding:8px; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; cursor:pointer;">Dismiss</button>
   </div>
 </div>
 
@@ -126,7 +135,7 @@
         <select id="persona-select" title="Switch Persona">
           <option value="default">🎭 Horizon</option>
         </select>
-        <button id="export-pdf-btn" style="background:var(--accent-gold); color:#fff; border:none; padding:4px 8px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:bold; margin-right:8px;">📄 PDF</button>
+        <button id="export-pdf-btn" class="mono" style="background:var(--signal,#E8FF00); color:var(--carbon,#111110); border:2px solid var(--carbon,#111110); padding:5px 10px; cursor:pointer; font-size:10px; font-weight:800; letter-spacing:0.1em; margin-right:8px;">PDF</button>
         <button id="send-btn">Send</button>
       </div>
     </div>
@@ -269,7 +278,7 @@
 
            <input type="text" id="note-title" placeholder="Note Title...">
            <div style="display:flex; gap: 8px;">
-             <button id="export-docx-btn" style="background: rgba(46,116,181,0.2); border: 1px solid rgba(46,116,181,0.5); color: #fff;">Export Docx</button>
+             <button id="export-docx-btn" class="mono" style="background: var(--surface-light,#f0eee6); border: 2px solid var(--carbon,#111110); color: var(--carbon,#111110); padding:9px 16px; font-size:10px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; cursor:pointer;">Export Docx</button>
              <button id="toggle-mindmap-btn">Toggle Neural Field</button>
            </div>
         </div>
@@ -338,8 +347,6 @@
           <div class="agent-log">IDLE</div>
         </div>
 
-
-
       </div>
 
       <div id="armata-terminal">
@@ -352,25 +359,26 @@
 
     </div>
   </div>
-</div>
 
-<div class="panel" id="panel-ide">
-  <div id="ide-chat-history">
-    <div class="ide-message ide-message-system">[System] Agentic IDE ready. I can read, write, and execute code directly in your workspace.</div>
-  </div>
-  
-  <div id="ide-input-area" class="unified-input-area">
-    <div id="ide-status-bar">
-      <span id="ide-status-indicator">💤 Idle</span>
-      <span id="ide-model-indicator">🤖 Selecting Model</span>
+  <!-- IDE Panel -->
+  <div class="panel" id="panel-ide">
+    <div id="ide-chat-history">
+      <div class="ide-message ide-message-system">[System] Agentic IDE ready. I can read, write, and execute code directly in your workspace.</div>
     </div>
-    <div class="ide-input-wrapper">
-      <textarea id="ide-chat-input" rows="1" placeholder="Describe your coding task..."></textarea>
-      <button id="ide-send-btn" onclick="window.ideSendPrompt()">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
-      </button>
+    <div id="ide-input-area" class="unified-input-area">
+      <div id="ide-status-bar">
+        <span id="ide-status-indicator">💤 Idle</span>
+        <span id="ide-model-indicator">🤖 Selecting Model</span>
+      </div>
+      <div class="ide-input-wrapper">
+        <textarea id="ide-chat-input" rows="1" placeholder="Describe your coding task..."></textarea>
+        <button id="ide-send-btn" onclick="window.ideSendPrompt()">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+        </button>
+      </div>
     </div>
   </div>
+
 </div>
 
 <div id="help-overlay" class="overlay">
@@ -433,16 +441,16 @@
       </select>
     </div>
 
-    <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
-      <h4 style="color: var(--accent-gold); margin-bottom: 10px;">🔌 MCP Store (<span id="mcp-count">0</span> serveurs)</h4>
+    <div style="margin-top: 15px; border-top: 2px solid var(--carbon,#111110); padding-top: 15px;">
+      <h4 style="margin-bottom: 10px;">// MCP STORE (<span id="mcp-count">0</span> serveurs)</h4>
       <div id="mcp-store-container" style="display: flex; flex-direction: column; gap: 8px; font-size: 13px; max-height: 180px; overflow-y: auto; padding-right: 5px;">
         <!-- MCP servers will be loaded here -->
       </div>
-      <button onclick="loadMcpStore()" style="margin-top: 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 5px 10px; border-radius: 4px; cursor: pointer;">Actualiser le Store</button>
+      <button onclick="loadMcpStore()" class="mono" style="margin-top: 10px; background: var(--surface-light,#f0eee6); border: 2px solid var(--carbon,#111110); color: var(--carbon,#111110); padding: 7px 12px; font-size:10px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; cursor: pointer;">Actualiser le Store</button>
     </div>
 
-    <div id="persona-crafter" style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
-      <h4 style="color: var(--accent-gold); margin-bottom: 10px;">🎭 Persona Crafter</h4>
+    <div id="persona-crafter" style="margin-top: 15px; border-top: 2px solid var(--carbon,#111110); padding-top: 15px;">
+      <h4 style="margin-bottom: 10px;">// PERSONA CRAFTER</h4>
       <div class="setting-row">
         <label>Persona Name</label>
         <input id="pc-name" type="text" placeholder="e.g. Sensei">
@@ -503,7 +511,6 @@
 <script src="modules/llm.js"></script>
 <script src="modules/image.js"></script>
 <script src="modules/cinema.js"></script>
-<script src="modules/openclaude.js"></script>
 <script src="modules/notes.js"></script>
 <script src="modules/armata.js"></script>
 <script src="modules/onboarding.js"></script>

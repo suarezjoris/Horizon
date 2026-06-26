@@ -161,7 +161,7 @@
                 .force("y", d3.forceY(height / 2).strength(0.05));
 
             const link = g.append("g")
-                .attr("stroke", "rgba(255, 255, 255, 0.2)")
+                .attr("stroke", "rgba(232, 230, 221, 0.25)")
                 .selectAll("line")
                 .data(links)
                 .join("line")
@@ -179,17 +179,17 @@
             // Obsidian style: Light grey nodes, slightly smaller, ghost nodes are darker
             node.append("circle")
                 .attr("r", 6)
-                .attr("fill", d => d.ghost ? "#555555" : "#a8a8a8")
-                .attr("stroke", d => d.ghost ? "#333" : "none")
+                .attr("fill", d => d.ghost ? "#54524a" : "#E8FF00")
+                .attr("stroke", d => d.ghost ? "#8a897d" : "none")
                 .attr("stroke-width", 1);
 
             node.append("text")
                 .text(d => d.name)
                 .attr("x", 10)
                 .attr("y", 4)
-                .attr("fill", "rgba(255,255,255,0.7)")
+                .attr("fill", "rgba(232,230,221,0.85)")
                 .style("font-size", "12px")
-                .style("font-family", "sans-serif")
+                .style("font-family", "'JetBrains Mono', monospace")
                 .style("pointer-events", "none");
 
             simulation.on("tick", () => {

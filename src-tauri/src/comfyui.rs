@@ -174,7 +174,7 @@ pub async fn generate_image(
     let is_i2i = image_path.is_some();
 
     // 1. Unload Ollama to free VRAM
-    let _ = ollama::unload(&s.llm_model).await;
+    ollama::unload().await?;
 
     // 2. Load workflow template
     let workflow_file = match (engine.as_str(), is_i2i) {
@@ -373,7 +373,7 @@ pub async fn generate_inpainting(
     let s = settings::load();
 
     // 1. Unload Ollama
-    let _ = ollama::unload(&s.llm_model).await;
+    ollama::unload().await?;
 
     // 2. Load workflow template
     let workflow_file = "comfyui-inpaint-workflow.json";

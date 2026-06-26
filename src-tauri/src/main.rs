@@ -6,8 +6,8 @@ mod archivist;
 mod armata;
 mod audio;
 mod chat;
-
 mod cinema;
+mod code_preview;
 mod comfyui;
 mod commands;
 mod daemon_manager;
@@ -15,14 +15,17 @@ mod embeddings;
 mod file_reader;
 mod forge_daemon;
 mod graphify;
+mod ide_agent;
 mod image_store;
+mod mcp;
+mod md_converter;
 mod memory;
+mod metrics;
 mod office;
 mod ollama;
-mod openclaude;
-mod ide_agent;
+mod plugins;
+mod pptx_native;
 mod pty;
-
 mod pyenv;
 mod search;
 mod settings;
@@ -33,16 +36,8 @@ mod vault;
 mod vram_queue;
 mod wiki_daemon;
 mod wikipedia;
-mod code_preview;
-mod md_converter;
-mod plugins;
-mod metrics;
-mod mcp;
 
 fn main() {
-    // WebKitGTK on Linux/NVIDIA stalls repaints (the UI only updates on window
-    // events, scrolling lags) with the DMABUF renderer. Disable it before the
-    // webview initializes for a smooth UI. Linux-only; does not affect Windows.
     #[cfg(target_os = "linux")]
     std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
 
@@ -88,6 +83,9 @@ fn main() {
             office::generate_docx,
             office::generate_xlsx,
             office::generate_pptx,
+            pptx_native::analyze_pptx_request,
+            pptx_native::scrape_pptx_templates,
+            pptx_native::execute_pptx_generation,
             memory::process_calibration,
             vault::list_notes,
             vault::read_note,
@@ -123,14 +121,11 @@ fn main() {
             audio::transcribe_audio,
             sys_diagnostic::run_diagnostics,
             sys_diagnostic::fix_health_issue,
-            openclaude::start_openclaude,
-            openclaude::send_openclaude_raw,
             armata::execute_armata_command,
             armata::toggle_agent,
             armata::get_armata_status,
             metrics::get_daemon_metrics,
             daemon_manager::toggle_agent_daemon,
-
             code_preview::execute_code_preview,
             md_converter::export_note_as_docx,
             md_converter::export_vault_as_docx,

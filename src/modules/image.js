@@ -26,7 +26,7 @@ let ctxMenu = null;
 function buildContextMenu() {
     const menu = document.createElement('div');
     menu.id = 'img-ctx-menu';
-    menu.style.cssText = 'position:fixed;display:none;z-index:9999;background:#1a1a2e;border:1px solid #444;border-radius:6px;padding:4px 0;min-width:170px;box-shadow:0 4px 16px rgba(0,0,0,.6)';
+    menu.style.cssText = 'position:fixed;display:none;z-index:9999;background:#f0eee6;border:2px solid #111110;padding:4px 0;min-width:170px;box-shadow:5px 5px 0 #111110';
     const useBaseItem = document.createElement('div');
     useBaseItem.className = 'ctx-item';
     useBaseItem.id = 'ctx-use-base';
@@ -53,7 +53,7 @@ function buildContextMenu() {
     menu.appendChild(saveItem);
     menu.appendChild(copyItem);
     const style = document.createElement('style');
-    style.textContent = '.ctx-item{padding:8px 16px;cursor:pointer;font-size:13px;color:#ccc}.ctx-item:hover{background:#2a2a4e;color:#fff}';
+    style.textContent = ".ctx-item{padding:8px 16px;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:0.04em;color:#111110}.ctx-item:hover{background:#E8FF00;color:#111110}";
     document.head.appendChild(style);
     document.body.appendChild(menu);
     document.addEventListener('click', () => { menu.style.display = 'none'; });
@@ -86,7 +86,7 @@ function showContextMenu(e, realPath) {
             await safeInvoke('copy_image_to_clipboard', { path: realPath });
             const n = document.createElement('div');
             n.textContent = 'Image copied to clipboard';
-            n.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#2a2a4e;color:#a0d4ff;padding:10px 16px;border-radius:6px;font-size:13px;z-index:9998';
+            n.style.cssText = "position:fixed;bottom:20px;right:20px;background:#111110;color:#E8FF00;border:2px solid #111110;padding:10px 16px;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:0.06em;text-transform:uppercase;z-index:9998";
             document.body.appendChild(n);
             setTimeout(() => n.remove(), 2500);
         } catch (err) {
@@ -100,7 +100,7 @@ function showContextMenu(e, realPath) {
             const name = dest.split('/').pop();
             const n = document.createElement('div');
             n.textContent = `Saved: ${name}`;
-            n.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#2a2a4e;color:#a0d4ff;padding:10px 16px;border-radius:6px;font-size:13px;z-index:9998';
+            n.style.cssText = "position:fixed;bottom:20px;right:20px;background:#111110;color:#E8FF00;border:2px solid #111110;padding:10px 16px;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:0.06em;text-transform:uppercase;z-index:9998";
             document.body.appendChild(n);
             setTimeout(() => n.remove(), 3000);
         } catch (err) {
