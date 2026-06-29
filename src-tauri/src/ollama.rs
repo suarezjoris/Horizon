@@ -32,7 +32,14 @@ struct EmbedResponse {
 }
 
 lazy_static::lazy_static! {
-    static ref HTTP_CLIENT: Client = Client::new();
+    // connect_timeout bounds the TCP/handshake; read_timeout fires only on
+    // inter-byte inactivity, so it bounds a stalled Ollama (model deadlock,
+    // crash) without ever killing a healthy stream where tokens keep flowing.
+    static ref HTTP_CLIENT: Client = Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .read_timeout(std::time::Duration::from_secs(120))
+        .build()
+        .expect("failed to build HTTP client");
 }
 
 /// Stream a chat response, emitting "llm-token" events for each token.

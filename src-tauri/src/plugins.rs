@@ -49,36 +49,70 @@ pub struct LoadedPlugin {
     pub dir: PathBuf,
 }
 
+/// Max bytes of plugin stdout fed back to the LLM. Larger output is truncated so one
+/// chatty plugin can't blow the model's context window.
+pub const PLUGIN_OUTPUT_LIMIT: usize = 32 * 1024;
+
+/// Mount point where Horizon's vault is bound read-only inside every plugin sandbox.
+/// Plugins read their data from here instead of reaching into $HOME (which is not bound).
+pub const SANDBOX_VAULT: &str = "/vault";
+
+/// Truncate plugin output to PLUGIN_OUTPUT_LIMIT on a char boundary, appending a note.
+fn truncate_output(s: &str) -> String {
+    if s.len() <= PLUGIN_OUTPUT_LIMIT {
+        return s.to_string();
+    }
+    let mut end = PLUGIN_OUTPUT_LIMIT;
+    while end > 0 && !s.is_char_boundary(end) { end -= 1; }
+    format!("{}\n…[truncated {} bytes]", &s[..end], s.len() - end)
+}
+
 pub struct PluginRegistry {
     pub plugins: HashMap<String, LoadedPlugin>,
+    pub load_errors: Vec<String>,
 }
 
 impl PluginRegistry {
     pub fn new() -> Self {
-        Self { plugins: HashMap::new() }
+        Self { plugins: HashMap::new(), load_errors: Vec::new() }
     }
 
     pub fn scan_and_load(&mut self, vault_path: &str) {
         self.plugins.clear();
+        self.load_errors.clear();
         let plugin_dir = Path::new(vault_path).join("plugins");
-        
-        if let Ok(entries) = std::fs::read_dir(&plugin_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    let manifest_path = path.join("plugin.json");
-                    if manifest_path.exists() {
-                        if let Ok(content) = std::fs::read_to_string(&manifest_path) {
-                            if let Ok(manifest) = serde_json::from_str::<PluginManifest>(&content) {
-                                self.plugins.insert(manifest.name.clone(), LoadedPlugin {
-                                    manifest,
-                                    dir: path,
-                                });
-                            }
-                        }
-                    }
+        // tool.name -> plugin.name, to reject duplicate tool names the LLM would otherwise see twice.
+        let mut tool_names: HashMap<String, String> = HashMap::new();
+
+        let entries = match std::fs::read_dir(&plugin_dir) {
+            Ok(e) => e,
+            Err(_) => return, // no plugins dir yet is not an error
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() { continue; }
+            let manifest_path = path.join("plugin.json");
+            if !manifest_path.exists() { continue; }
+            let dir_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+
+            let content = match std::fs::read_to_string(&manifest_path) {
+                Ok(c) => c,
+                Err(e) => { self.load_errors.push(format!("{dir_name}: unreadable plugin.json: {e}")); continue; }
+            };
+            let manifest = match serde_json::from_str::<PluginManifest>(&content) {
+                Ok(m) => m,
+                Err(e) => { self.load_errors.push(format!("{dir_name}: invalid plugin.json: {e}")); continue; }
+            };
+            if let Some(tool) = &manifest.tool {
+                if let Some(owner) = tool_names.get(&tool.name) {
+                    self.load_errors.push(format!(
+                        "{}: tool name '{}' already provided by '{}' — skipped",
+                        manifest.name, tool.name, owner));
+                    continue;
                 }
+                tool_names.insert(tool.name.clone(), manifest.name.clone());
             }
+            self.plugins.insert(manifest.name.clone(), LoadedPlugin { manifest, dir: path });
         }
     }
 
@@ -106,9 +140,12 @@ impl PluginRegistry {
             .ok_or_else(|| format!("Unknown plugin tool: {}", tool_name))?;
             
         let manifest = plugin.manifest.tool.as_ref().unwrap();
-        
-        let args_json = serde_json::to_string(args).unwrap();
-        
+
+        // Horizon injects context: plugins read args + the vault mount, never $HOME.
+        let host_vault = crate::settings::load().vault_path;
+        let payload = serde_json::json!({ "args": args, "vault": SANDBOX_VAULT });
+        let payload_json = serde_json::to_string(&payload).unwrap();
+
         let mut bwrap_args = vec![
             "--ro-bind".to_string(), "/usr".to_string(), "/usr".to_string(),
             "--ro-bind".to_string(), "/lib".to_string(), "/lib".to_string(),
@@ -118,6 +155,8 @@ impl PluginRegistry {
             "--proc".to_string(), "/proc".to_string(),
             "--dev".to_string(), "/dev".to_string(),
             "--bind".to_string(), plugin.dir.to_string_lossy().into_owned(), "/plugin".to_string(),
+            // Vault bound read-only so plugins can read mirrored app state (Objectives, etc.).
+            "--ro-bind".to_string(), host_vault, SANDBOX_VAULT.to_string(),
             "--chdir".to_string(), "/plugin".to_string(),
             "--unshare-all".to_string(),
         ];
@@ -145,7 +184,7 @@ impl PluginRegistry {
             
         use tokio::io::AsyncWriteExt;
         if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(args_json.as_bytes()).await;
+            let _ = stdin.write_all(payload_json.as_bytes()).await;
         }
         
         let output = match tokio::time::timeout(
@@ -160,9 +199,9 @@ impl PluginRegistry {
             }
         };
         
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stdout = truncate_output(&String::from_utf8_lossy(&output.stdout));
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        
+
         if output.status.success() {
             Ok(if stdout.is_empty() { "(plugin completed with no output)".to_string() } else { stdout })
         } else {
@@ -201,9 +240,55 @@ pub async fn get_plugin_html(plugin_name: String, state: tauri::State<'_, Plugin
 }
 
 #[tauri::command]
-pub async fn reload_plugins(state: tauri::State<'_, PluginState>) -> Result<Vec<String>, String> {
+pub async fn reload_plugins(state: tauri::State<'_, PluginState>) -> Result<Value, String> {
     let mut registry = state.write().await;
     let settings = crate::settings::load();
     registry.scan_and_load(&settings.vault_path);
-    Ok(registry.plugins.keys().cloned().collect())
+    Ok(serde_json::json!({
+        "loaded": registry.plugins.keys().cloned().collect::<Vec<_>>(),
+        "errors": registry.load_errors,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_keeps_short_output() {
+        assert_eq!(truncate_output("hello"), "hello");
+    }
+
+    #[test]
+    fn truncate_caps_long_output() {
+        let big = "x".repeat(PLUGIN_OUTPUT_LIMIT + 100);
+        let out = truncate_output(&big);
+        assert!(out.len() < big.len());
+        assert!(out.contains("truncated"));
+    }
+
+    #[test]
+    fn scan_records_invalid_manifest_and_skips_dup_tool_names() {
+        let tmp = std::env::temp_dir().join(format!("horizon_plugins_test_{}", std::process::id()));
+        let pdir = tmp.join("plugins");
+        let mk = |name: &str, body: &str| {
+            let d = pdir.join(name);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("plugin.json"), body).unwrap();
+        };
+        let tool = |pname: &str, tname: &str| format!(
+            r#"{{"name":"{pname}","version":"1","description":"d","type":"tool",
+            "tool":{{"name":"{tname}","description":"d","parameters":{{}},"runtime":"python3","script":"t.py"}}}}"#);
+        mk("a", &tool("a", "shared"));
+        mk("b", &tool("b", "shared")); // duplicate tool name -> skipped
+        mk("bad", "{ not json");        // invalid -> recorded
+
+        let mut reg = PluginRegistry::new();
+        reg.scan_and_load(tmp.to_str().unwrap());
+
+        assert_eq!(reg.plugins.len(), 1, "dup tool name must be skipped");
+        assert!(reg.load_errors.iter().any(|e| e.contains("invalid plugin.json")));
+        assert!(reg.load_errors.iter().any(|e| e.contains("already provided")));
+        std::fs::remove_dir_all(&tmp).ok();
+    }
 }

@@ -96,21 +96,29 @@ pub fn pick_empty_facet(j: &CuriosityJournal, facets: &[String]) -> Option<Strin
     facets.iter().find(|f| !covered.contains(*f)).cloned()
 }
 
-pub fn build_question_prompt(facet: &str, asked: &[String]) -> String {
+pub fn build_question_prompt(facet: &str, context: &str, asked: &[String]) -> String {
+    // Turn the facet id into a concrete subject the LLM must name explicitly.
+    let subject = match facet.strip_prefix("hobby_depth:") {
+        Some(h) => format!("son hobby « {} » (nomme « {} » explicitement)", h, h),
+        None => format!("la facette « {} »", facet),
+    };
     let avoid = if asked.is_empty() {
         "(aucune pour l'instant)".to_string()
     } else {
         asked.iter().map(|q| format!("- {}", q)).collect::<Vec<_>>().join("\n")
     };
     format!(
-        "Tu aides à enrichir le profil personnel de l'utilisateur. Pose UNE SEULE question, \
-courte, précise et concrète, pour en apprendre plus sur cette facette de lui : '{}'.\n\
+        "Voici ce que tu sais déjà sur l'utilisateur :\n---\n{}\n---\n\n\
+Pose UNE SEULE question, courte, PRÉCISE et CONCRÈTE, pour approfondir {}.\n\
 Règles strictes :\n\
-- Une seule question, en français, tutoiement.\n\
+- Une seule question, en français, au TUTOIEMENT ('tu', jamais 'vous').\n\
+- NOMME explicitement le sujet. INTERDIT les formulations vagues du type 'cette passion', \
+'cette activité', 'ce domaine' — dis le vrai nom (ex: 'en airsoft', 'au piano').\n\
+- Ancre-toi sur ce que tu sais déjà de lui ci-dessus quand c'est pertinent.\n\
+- Ne présume rien qu'il n'a pas dit.\n\
 - Évite absolument ces questions déjà posées :\n{}\n\
-- Si la facette semble large, descends dans un détail précis.\n\
 - Réponds UNIQUEMENT avec la question, sans préambule ni guillemets.",
-        facet, avoid
+        context, subject, avoid
     )
 }
 
@@ -200,6 +208,64 @@ pub fn curiosity_propose_topic() -> Result<Option<String>, String> {
     Ok(None)
 }
 
+/// Wikipedia REST summary — reliable, no bot-blocking (unlike html.duckduckgo).
+/// Returns the plain-text extract, empty string if the page doesn't exist.
+async fn fetch_wikipedia(topic: &str) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("Horizon/6 (personal knowledge assistant)")
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let url = format!(
+        "https://fr.wikipedia.org/api/rest_v1/page/summary/{}",
+        urlencoding::encode(topic)
+    );
+    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Ok(String::new());
+    }
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(json["extract"].as_str().unwrap_or("").to_string())
+}
+
+/// Source for a topic: Wikipedia first, fall back to web search.
+async fn fetch_topic_source(topic: &str) -> Result<String, String> {
+    match fetch_wikipedia(topic).await {
+        Ok(t) if t.trim().len() > 50 => Ok(t),
+        _ => crate::search::duckduckgo_search(topic).await,
+    }
+}
+
+async fn fill_topic_inner(s: &crate::settings::Settings, topic: &str) -> Result<String, String> {
+    let source = fetch_topic_source(topic).await?;
+    if source.trim().is_empty() {
+        return Err(format!("Aucune source trouvée pour « {} ».", topic));
+    }
+
+    let prompt = format!(
+        "Rédige une note de connaissance markdown concise sur '{}', à partir de cette \
+source. Titre, résumé, puis faits clés en bullets. Pas de blabla.\n\nSource:\n{}",
+        topic, source
+    );
+    let body = crate::ollama::chat_once(
+        vec![serde_json::json!({"role": "user", "content": prompt})],
+        &s.agents.light_model,
+    ).await?;
+
+    let slug = crate::forge_daemon::url_slug(topic);
+    let rel = format!("knowledge/{}.md", slug);
+    let content = format!("# {}\n\n{}\n", topic, body.trim());
+    crate::vault::write_vault_note(&s.vault_path, &rel, &content)?;
+
+    let mut journal = load_journal();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    journal.proposed_topics.push(ProposedTopic { topic: topic.to_string(), ts: now, accepted: true });
+    let _ = save_journal(&journal);
+
+    let _ = crate::embeddings::reindex().await;
+    Ok(format!("Connaissance ajoutée : {}", rel))
+}
+
 #[tauri::command]
 pub async fn curiosity_fill_topic(
     vram_queue: tauri::State<'_, crate::vram_queue::VramQueue>,
@@ -208,29 +274,19 @@ pub async fn curiosity_fill_topic(
     let _permit = vram_queue.acquire("curiosity-fill").await.map_err(|e| e.to_string())?;
     let s = crate::settings::load();
 
-    let web = crate::search::duckduckgo_search(&topic).await?;
-    let prompt = format!(
-        "Rédige une note de connaissance markdown concise sur '{}', à partir de ces \
-résultats web. Titre, résumé, puis faits clés en bullets. Pas de blabla.\n\nRésultats:\n{}",
-        topic, web
-    );
-    let body = crate::ollama::chat_once(
-        vec![serde_json::json!({"role": "user", "content": prompt})],
-        &s.agents.light_model,
-    ).await?;
-
-    let slug = crate::forge_daemon::url_slug(&topic);
-    let rel = format!("knowledge/{}.md", slug);
-    let content = format!("# {}\n\n{}\n", topic, body.trim());
-    crate::vault::write_vault_note(&s.vault_path, &rel, &content)?;
-
-    let mut journal = load_journal();
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-    journal.proposed_topics.push(ProposedTopic { topic: topic.clone(), ts: now, accepted: true });
-    let _ = save_journal(&journal);
-
-    let _ = crate::embeddings::reindex().await;
-    Ok(format!("Connaissance ajoutée : {}", rel))
+    // Hard ceiling on the whole operation: Ollama's HTTP client has no timeout,
+    // so a stalled chat_once / reindex would otherwise hang forever while holding
+    // the GPU lock. On timeout the future is dropped and the permit released.
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        fill_topic_inner(&s, &topic),
+    ).await {
+        Ok(result) => result,
+        Err(_) => Err(format!(
+            "La recherche sur « {} » a dépassé 120s — annulée. Réessaie ou choisis un autre sujet.",
+            topic
+        )),
+    }
 }
 
 #[tauri::command]
