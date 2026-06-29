@@ -1,5 +1,4 @@
 const commands = [
-    { name: '/analyze-topics', desc: 'Proposer un nouveau hub pour les notes non catégorisées' },
     { name: '/clear', desc: 'Effacer la conversation' },
     { name: '/consolidate', desc: 'Consolider les neurones et refactoriser le Second Cerveau' },
     { name: '/docx', desc: 'Générer un document Word' },

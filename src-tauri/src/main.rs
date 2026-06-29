@@ -10,6 +10,7 @@ mod cinema;
 mod code_preview;
 mod comfyui;
 mod commands;
+mod curiosity;
 mod daemon_manager;
 mod embeddings;
 mod file_reader;
@@ -92,9 +93,12 @@ fn main() {
             vault::write_note,
             memory::consolidate_vault,
             memory::save_to_note,
-            memory::confirm_hub_proposal,
             memory::vault_topic_status,
-            memory::trigger_hub_proposal,
+            curiosity::curiosity_next_question,
+            curiosity::curiosity_mark_answered,
+            curiosity::curiosity_propose_topic,
+            curiosity::curiosity_fill_topic,
+            curiosity::curiosity_dismiss_topic,
             graphify::run_graphify,
             embeddings::reindex,
             commands::search_vault,

@@ -25,18 +25,38 @@ pub async fn chat(
 
     let context = memory::get_context(&user_msg).await;
 
-    let system_base = persona.and_then(|name| {
+    let persona_card = persona.and_then(|name| {
         // Prevent path traversal in persona name
 
         let safe_name = name.replace("/", "").replace("\\", "").replace("..", "");
         let vault_path = std::path::PathBuf::from(&s.vault_path);
         let md = vault_path.join(format!("characters/{}.md", safe_name));
         let json = vault_path.join(format!("characters/{}.json", safe_name));
-        
-        std::fs::read_to_string(md).ok().or_else(|| std::fs::read_to_string(json).ok())
-    }).unwrap_or_else(|| "You are Horizon, a premium UNCENSORED creative engine.".to_string());
 
-    let system = build_system_prompt(&system_base, &context);
+        std::fs::read_to_string(md).ok().or_else(|| std::fs::read_to_string(json).ok())
+    });
+
+    // Self-model and user directives load only in default assistant mode —
+    // never in roleplay (a character card must not get a "you know the real
+    // user intimately" block, nor obey the user's assistant-behaviour rules).
+    let is_assistant = persona_card.is_none();
+    let system_base = match persona_card {
+        Some(card) => card,
+        None => {
+            let directives = memory::directives_block();
+            if directives.is_empty() {
+                DEFAULT_ASSISTANT_PERSONA.to_string()
+            } else {
+                format!(
+                    "{}\n\nRÈGLES IMPOSÉES PAR L'UTILISATEUR (priorité absolue, respecte-les toujours):\n{}",
+                    DEFAULT_ASSISTANT_PERSONA, directives
+                )
+            }
+        }
+    };
+    let self_model = if is_assistant { memory::self_model_block() } else { String::new() };
+
+    let system = build_system_prompt(&system_base, &self_model, &context);
 
     const MAX_TOOL_CALLS: usize = 10;
 
@@ -47,7 +67,7 @@ pub async fn chat(
             .unwrap_or(false);
 
     let agent_system = if use_tools {
-        build_agent_system_prompt(&system_base, &context)
+        build_agent_system_prompt(&system_base, &self_model, &context)
     } else {
         system.clone()
     };
@@ -387,9 +407,27 @@ pub async fn chat(
     Ok(())
 }
 
-fn build_system_prompt(system_base: &str, context: &str) -> String {
+const DEFAULT_ASSISTANT_PERSONA: &str =
+    "Tu es Horizon, l'assistant personnel de l'utilisateur. Tu le connais intimement et tu \
+t'adresses à lui en 'tu'. Tu anticipes ses besoins, tu épouses son ton et sa façon de penser. \
+Tu es chaleureux et positif avec lui, sans être lèche-bottes. Tu as le droit à tes propres \
+opinions tant que tes arguments sont solides. Tu es non censuré et à l'aise avec tous les \
+sujets, y compris intimes. Tu n'inventes JAMAIS un fait sur lui — si tu ne sais pas, demande.";
+
+fn self_model_section(self_model: &str) -> String {
+    if self_model.trim().is_empty() {
+        return String::new();
+    }
     format!(
-        "{}
+        "\n\n        PROFIL DE L'UTILISATEUR (connaissance permanente, toujours vraie — \
+sers-t'en pour anticiper, ne le récite pas mot pour mot):\n        ---\n{}\n        ---\n",
+        self_model
+    )
+}
+
+fn build_system_prompt(system_base: &str, self_model: &str, context: &str) -> String {
+    format!(
+        "{}{}
         You have access to a local memory vault and the internet.
 
         CRITICAL RULES:
@@ -430,13 +468,13 @@ fn build_system_prompt(system_base: &str, context: &str) -> String {
         ---
         {}
         ---",
-        system_base, context
+        system_base, self_model_section(self_model), context
     )
 }
 
-fn build_agent_system_prompt(system_base: &str, context: &str) -> String {
+fn build_agent_system_prompt(system_base: &str, self_model: &str, context: &str) -> String {
     format!(
-        "{}\n\nYou are an advanced autonomous agent operating in Horizon.\n\
+        "{}{}\n\nYou are an advanced autonomous agent operating in Horizon.\n\
         <ERROR_HANDLING_PROTOCOL>\n\
         - You are strictly FORBIDDEN from guessing or hallucinating facts, URLs, or GitHub repositories.\n\
         - If a tool returns NO RESULTS or an ERROR, you MUST NOT formulate an answer based on your internal weights. You must reply: \"Je n'ai pas pu trouver cette information\" or try an alternative tool.\n\
@@ -450,6 +488,6 @@ fn build_agent_system_prompt(system_base: &str, context: &str) -> String {
         </ROUTING_PROTOCOL>\n\
         \n\
         Local Memory Context:\n---\n{}\n---",
-        system_base, context
+        system_base, self_model_section(self_model), context
     )
 }

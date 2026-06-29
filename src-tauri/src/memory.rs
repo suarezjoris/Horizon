@@ -1,8 +1,8 @@
 use crate::{embeddings, ollama, settings, vault};
 use tauri::Emitter;
 
-const TOP_K: usize = 3; 
-const MAX_CONTEXT_CHARS: usize = 4000; 
+const TOP_K: usize = 8;
+const MAX_CONTEXT_CHARS: usize = 8000;
 
 fn is_introspective_query(q: &str) -> bool {
     let q = q.to_lowercase();
@@ -35,9 +35,10 @@ pub async fn get_context(query: &str) -> String {
     }
 
     if !index.is_empty() {
-        if let Ok(vecs) = ollama::embed(vec![query.to_string()], "nomic-embed-text:latest").await {
+        let q = ollama::nomic_prefix("nomic-embed-text:latest", ollama::NomicTask::Query, query);
+        if let Ok(vecs) = ollama::embed(vec![q], "nomic-embed-text:latest").await {
             if let Some(qvec) = vecs.into_iter().next() {
-                let results = index.search(&qvec, TOP_K);
+                let results = index.search_hybrid(&qvec, query, TOP_K, !is_introspective_query(query));
 
                 let ids: Vec<u64> = results.iter().map(|r| r.id).collect();
                 if !ids.is_empty() {
@@ -78,38 +79,65 @@ pub async fn get_context(query: &str) -> String {
     blocks.join("\n\n")
 }
 
+/// Map a calibration section header to its destination note. Matches on the
+/// start of the uppercased header, so trailing parentheticals are tolerated
+/// (e.g. "MA VOIX (extraits…)").
+fn calibration_section_file(line: &str) -> Option<&'static str> {
+    let h = line.trim().to_uppercase();
+    if h.starts_with("QUI JE SUIS") { Some("identity.md") }
+    else if h.starts_with("COMMENT JE PENSE") { Some("mindset.md") }
+    else if h.starts_with("CE QUE JE CONSTRUIS") { Some("projects.md") }
+    else if h.starts_with("HOBBIES") { Some("passions.md") }
+    else if h.starts_with("MA VOIX") { Some("voice.md") }
+    else if h.starts_with("NON-NÉGOCIABLES") || h.starts_with("NON-NEGOCIABLES") { Some("directives.md") }
+    else { None }
+}
+
+/// Split a sectioned calibration dump into (note_file, body) pairs, verbatim.
+/// Text before the first recognised header lands in identity.md.
+pub fn split_calibration_sections(text: &str) -> Vec<(String, String)> {
+    let mut sections: Vec<(String, String)> = Vec::new();
+    let mut current = "identity.md".to_string();
+    let mut buf = String::new();
+
+    let flush = |file: &str, buf: &mut String, out: &mut Vec<(String, String)>| {
+        if !buf.trim().is_empty() {
+            out.push((file.to_string(), buf.trim().to_string()));
+        }
+        buf.clear();
+    };
+
+    for line in text.lines() {
+        if let Some(file) = calibration_section_file(line) {
+            flush(&current, &mut buf, &mut sections);
+            current = file.to_string();
+        } else {
+            buf.push_str(line);
+            buf.push('\n');
+        }
+    }
+    flush(&current, &mut buf, &mut sections);
+    sections
+}
+
 #[tauri::command]
 pub async fn process_calibration(text: String) -> Result<String, String> {
     let s = settings::load();
-    let prompt = format!(
-        "You are the Core Archetype Weaver. Analyze this 'Initial Brain Dump' from the user and create a structured, linked memory vault.
-        
-        Rules:
-        - Detect themes and create relevant notes (e.g., identity.md, tech_stack.md, passions.md).
-        - Use [[wikilinks]] to connect related notes.
-        - Output format: RAW JSON object where keys are filenames (e.g., 'identity.md') and values are markdown content.
 
-        BRAIN DUMP:
-        {}",
-        text
-    );
-
-    let resp = ollama::chat_once(vec![serde_json::json!({"role": "user", "content": prompt})], &s.llm_model).await?;
-    
-    let json_str = resp.trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
-    let data: serde_json::Value = serde_json::from_str(json_str).map_err(|e| format!("Parsing Error: {}", e))?;
-
-    if let Some(obj) = data.as_object() {
-        for (file, content) in obj {
-            if vault::validate_rel_path(file).is_ok() {
-                if let Some(c) = content.as_str() {
-                    let _ = vault::write_vault_note(&s.vault_path, file, c);
-                }
-            }
+    // Deterministic, verbatim — no LLM. Summarising the dump would dilute the
+    // user's own words (especially the voice samples), which defeats the point.
+    let mut written = 0usize;
+    for (file, body) in split_calibration_sections(&text) {
+        if vault::validate_rel_path(&file).is_err() { continue; }
+        let title = file.trim_end_matches(".md");
+        let content = format!("# {}\n\n{}\n", title, body);
+        if vault::write_vault_note(&s.vault_path, &file, &content).is_ok() {
+            written += 1;
         }
     }
 
-    Ok("Calibration complete. Emergent brain mapped.".to_string())
+    crate::embeddings::reindex().await.ok();
+    Ok(format!("Calibration complete: {} sections saved.", written))
 }
 
 pub async fn extract_and_save(user_msg: String, ai_msg: String, vram: std::sync::Arc<tokio::sync::Semaphore>) {
@@ -295,44 +323,64 @@ fn is_archive(path: &str) -> bool {
     ARCHIVE_PREFIXES.iter().any(|p| path.starts_with(p))
 }
 
-const DEFAULT_HUBS: &[(&str, &str, &[&str])] = &[
-    ("ai",          "# AI & Machine Learning\n\nHub for artificial intelligence, LLMs, neural networks, and ML research.\n",
-     &["artificial intelligence", " ai ", "machine learning", "llm", "neural network",
-       "deep learning", "gpt", "ollama", "diffusion", "transformer", "chatgpt",
-       "openai", "claude", "gemini", "github copilot", "rag", "embedding"]),
-    ("security",    "# Security\n\nHub for cybersecurity, exploits, CVEs, vulnerabilities, and infosec news.\n",
-     &["security", "exploit", "cve-", "vulnerability", "malware", "hack",
-       "breach", "phishing", "zero-day", "ransomware", "worm", "stealers",
-       "injection", "xss", "trojan", "botnet", "spyware", "infosec", "ctf",
-       "pentest", "reverse engineer"]),
-    ("linux",       "# Linux\n\nHub for Linux, kernel development, distributions, and sysadmin topics.\n",
-     &["linux", "kernel", "ubuntu", "debian", "arch", "fedora", "systemd",
-       "bash", "posix", "unix", "distro", "wayland", "x11", "gtk"]),
-    ("programming", "# Programming\n\nHub for software development, languages, frameworks, and engineering practices.\n",
-     &["programming", "software", "developer", "code", "rust", "python",
-       "javascript", "typescript", "golang", "haskell", "c++", "c#",
-       "compiler", "algorithm", "api", "library", "framework", "open source",
-       "github", "git", "refactor", "devops", "ci/cd"]),
-    ("science",     "# Science\n\nHub for research, scientific discoveries, and academic topics.\n",
-     &["science", "research", "study", "biology", "physics", "chemistry",
-       "space", "nasa", "discovery", "experiment", "quantum", "climate"]),
-    ("gaming",      "# Gaming\n\nHub for video games, game development, and gaming culture.\n",
-     &["game", "steam", "gaming", "playstation", "xbox", "nintendo",
-       "esports", "fps", "rpg", "mmo", "indie game"]),
-    ("retro",       "# Retro Computing\n\nHub for classic computing, retro games, vintage software, and computing history.\n",
-     &["retro", "classic", "vintage", "1990s", "1980s", "1970s", "dos",
-       "commodore", "amiga", "8-bit", "16-bit", "old school", "nostalgia"]),
-    ("web",         "# Web & Internet\n\nHub for web technologies, browsers, networking, and internet culture.\n",
-     &["web", "browser", "http", "html", "css", "internet", "rss", "dns",
-       "cdn", "frontend", "backend", "saas", "api"]),
-    ("music",       "# Music\n\nHub for music, artists, songs, albums, piano, and musical culture.\n",
-     &["music", "song", "piano", "album", "artist", "melody", "lyrics",
-       "rap", "jazz", "classical", "singer", "band", "concert", "track",
-       "playlist", "spotify", "genre", "hip hop", "rock", "metal", "pop",
-       "composer", "orchestra", "vinyl"]),
-    ("notes",       "# General Notes\n\nHub for miscellaneous topics that don't fit elsewhere.\n",
-     &[]),
-];
+const SELF_MODEL_MAX_CHARS: usize = 3500;
+
+/// A note that describes the user themselves — excludes hubs, ingested
+/// knowledge, news digests, and internal memory files.
+pub fn is_personal_note(path: &str, hub_names: &[String]) -> bool {
+    if is_archive(path) { return false; }
+    if path.starts_with("memory/") { return false; }
+    let stem = note_stem(path);
+    // `directives` is injected as behaviour rules in the system prompt, not as
+    // passive profile context, so it's excluded from the self-model block.
+    if stem.starts_with("digest-") || stem == "self_model" || stem == "directives" { return false; }
+    !hub_names.iter().any(|h| h == stem)
+}
+
+const VOICE_SAMPLE_MAX_CHARS: usize = 1500;
+
+/// User behaviour rules (their non-negotiables), injected into the system
+/// prompt as imperative rules. Empty if the user never set any.
+pub fn directives_block() -> String {
+    let s = settings::load();
+    vault::read_vault_note(&s.vault_path, "directives.md")
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+/// Always-loaded self-model: the user's own personal notes, raw (no LLM
+/// summarisation — that would dilute their own words), capped in length,
+/// identity/passions first. Injected into every assistant-mode system prompt.
+pub fn self_model_block() -> String {
+    let s = settings::load();
+    let hub_names = all_hub_names();
+    let mut notes = vault::list_notes();
+
+    let priority = ["identity.md", "voice.md", "mindset.md", "projects.md", "passions.md"];
+    notes.sort_by_key(|p| priority.iter().position(|a| *a == p.as_str()).unwrap_or(usize::MAX));
+
+    let mut out = String::new();
+    for path in notes {
+        if !is_personal_note(&path, &hub_names) { continue; }
+        let Ok(c) = vault::read_vault_note(&s.vault_path, &path) else { continue };
+        let mut c = c.trim().to_string();
+        if c.is_empty() { continue; }
+        // Voice logs can be huge; a style sample is enough — don't let it eat
+        // the whole budget.
+        if path == "voice.md" && c.len() > VOICE_SAMPLE_MAX_CHARS {
+            let mut cut = VOICE_SAMPLE_MAX_CHARS;
+            while cut < c.len() && !c.is_char_boundary(cut) { cut += 1; }
+            c.truncate(cut);
+        }
+        let block = format!("### {}\n{}\n\n", path, c);
+        if out.len() + block.len() > SELF_MODEL_MAX_CHARS { break; }
+        out.push_str(&block);
+    }
+    out.trim().to_string()
+}
+
+const DEFAULT_HUBS: &[(&str, &str, &[&str])] = &[];
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct HubDef {
@@ -368,14 +416,6 @@ pub fn load_custom_hubs() -> Vec<HubDef> {
         .and_then(|s| serde_json::from_str::<HubsFile>(&s).ok())
         .map(|f| f.hubs.into_iter().filter(|h| validate_stem(&h.name).is_ok()).collect())
         .unwrap_or_default()
-}
-
-fn save_custom_hubs(hubs: &[HubDef]) -> Result<(), String> {
-    let path = hubs_json_path();
-    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
-    let file = HubsFile { hubs: hubs.to_vec() };
-    std::fs::write(&path, serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())
 }
 
 pub fn all_hub_names() -> Vec<String> {
@@ -758,156 +798,6 @@ Title: {}\n\n{}",
     total_facts
 }
 
-fn forge_log(app: &tauri::AppHandle, msg: &str) {
-    let _ = app.emit("armata-agent-status", serde_json::json!({
-        "agent": "forge", "status": "online", "message": msg
-    }));
-}
-
-pub async fn propose_new_hubs(app: &tauri::AppHandle, force: bool) -> Result<String, String> {
-    let s = settings::load();
-    let known = all_hub_names();
-
-    let notes = vault::list_notes();
-    let uncategorized: Vec<(String, String)> = notes.iter()
-        .filter(|p| !is_archive(p))
-        .filter_map(|p| {
-            let c = vault::read_vault_note(&s.vault_path, p).ok()?;
-            let topics_line = c.lines().find(|l| l.trim().starts_with("Topics:"))?;
-            let has_only_notes = topics_line.contains("[[notes]]")
-                && !known.iter().filter(|n| *n != "notes")
-                    .any(|n| topics_line.contains(&format!("[[{}]]", n)));
-            if has_only_notes { Some((p.clone(), c)) } else { None }
-        })
-        .collect();
-
-    forge_log(app, &format!(
-        "Topic scan: {}/{} notes uncategorized",
-        uncategorized.len(),
-        notes.iter().filter(|p| !is_archive(p)).count()
-    ));
-
-    if uncategorized.len() < 3 {
-        forge_log(app, "Topic scan: no new hub needed");
-        return Err("Not enough uncategorized notes (need at least 3).".into());
-    }
-
-    let vram_permit = {
-        use tauri::Manager;
-        let q = app.state::<crate::vram_queue::VramQueue>();
-        if force {
-            Some(q.acquire("forge-hub-propose").await.map_err(|e| e.to_string())?)
-        } else {
-            q.try_acquire("forge-hub-propose")
-        }
-    };
-    if vram_permit.is_none() {
-        forge_log(app, "Topic scan: deferred — chat is active");
-        return Err("LLM is currently busy with another task.".into());
-    }
-    forge_log(app, &format!("Topic scan: analysing {} uncategorized notes…", uncategorized.len()));
-
-    // Shuffle before sampling so the LLM sees a diverse cross-section each run,
-    // not always the same alphabetically-first notes (e.g. rally-heavy batches).
-    let seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos() as usize;
-    let mut shuffled = uncategorized.clone();
-    for i in (1..shuffled.len()).rev() {
-        let j = (seed.wrapping_mul(i + 1).wrapping_add(i * 6364136223846793005)) % (i + 1);
-        shuffled.swap(i, j);
-    }
-
-    let sample: String = shuffled.iter().take(12)
-        .map(|(path, content)| {
-            let preview: String = content.lines()
-                .filter(|l| !l.trim().is_empty() && !l.starts_with("Topics:"))
-                .take(3).collect::<Vec<_>>().join(" ");
-            format!("- {} : {}", path, preview.chars().take(120).collect::<String>())
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let prompt = format!(
-        "These vault notes are uncategorized (tagged [[notes]]). \
-Identify ONE clear topic cluster among them and suggest a new hub.\n\
-CRITICAL INSTRUCTION: Do NOT propose hubs related to automotive, racing, or rallye. Find a DIFFERENT topic cluster that exists in these notes.\n\
-Notes:\n{}\n\n\
-Respond with ONLY valid JSON: {{\"name\": \"topic_name\", \"description\": \"one sentence\", \"keywords\": [\"kw1\", \"kw2\", ...]}}",
-        sample
-    );
-
-    let resp = ollama::chat_once(
-        vec![serde_json::json!({"role": "user", "content": prompt})],
-        &s.agents.light_model,
-    ).await.map_err(|e| format!("LLM Error: {}", e))?;
-
-    drop(vram_permit);
-
-    let json_str = {
-        let r = resp.trim();
-        let s = r.find('{').unwrap_or(0);
-        let e = r.rfind('}').map(|i| i + 1).unwrap_or(r.len());
-        &r[s..e]
-    };
-
-    let proposal: serde_json::Value = serde_json::from_str(json_str)
-        .map_err(|e| format!("LLM output was not valid JSON: {}", e))?;
-    let (Some(name), Some(desc)) = (proposal["name"].as_str(), proposal["description"].as_str()) else { 
-        return Err("JSON missing 'name' or 'description'".into()); 
-    };
-    let keywords: Vec<String> = proposal["keywords"].as_array()
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
-        .unwrap_or_default();
-
-    if name.is_empty() || keywords.len() < 2 {
-        forge_log(app, "Topic scan: LLM response unusable");
-        return Err("LLM response unusable: empty name or too few keywords.".into());
-    }
-    if known.iter().any(|k| k == name) {
-        forge_log(app, &format!("Topic scan: [[{}]] already exists", name));
-        return Err(format!("Hub [[{}]] already exists.", name));
-    }
-
-    forge_log(app, &format!("Topic scan: proposing new hub [[{}]]", name));
-    let _ = app.emit("hub-proposal", serde_json::json!({
-        "name": name,
-        "description": desc,
-        "keywords": keywords,
-        "uncategorized_count": uncategorized.len()
-    }));
-    Ok("Hub analysis complete — check for a proposal banner.".into())
-}
-
-#[tauri::command]
-pub async fn confirm_hub_proposal(name: String, description: String, keywords: Vec<String>) -> Result<String, String> {
-    let s = settings::load();
-
-    let stem = name.trim().to_lowercase().replace(' ', "_");
-    validate_stem(&stem)?;
-    vault::validate_rel_path(&format!("{}.md", stem))
-        .map_err(|e| format!("Invalid hub name: {}", e))?;
-
-    let mut hubs = load_custom_hubs();
-    if hubs.iter().any(|h| h.name == stem) {
-        return Err(format!("Hub '{}' already exists", stem));
-    }
-    hubs.push(HubDef { name: stem.clone(), description: description.clone(), keywords });
-    save_custom_hubs(&hubs)?;
-
-    let filename = format!("{}.md", stem);
-    let note_path = std::path::PathBuf::from(&s.vault_path).join(&filename);
-    if !note_path.exists() {
-        let content = format!("# {}\n\n{}\n", stem.replace('_', " "), description);
-        vault::write_vault_note(&s.vault_path, &filename, &content).map_err(|e| e.to_string())?;
-    }
-
-    repair_all_orphans(&s.vault_path);
-    let indexed = crate::embeddings::reindex().await.unwrap_or(0);
-    Ok(format!("Hub '{}' created. {} chunks indexed.", stem, indexed))
-}
-
 #[tauri::command]
 pub fn vault_topic_status() -> serde_json::Value {
     let s = settings::load();
@@ -953,11 +843,6 @@ pub fn vault_topic_status() -> serde_json::Value {
     })
 }
 
-#[tauri::command]
-pub async fn trigger_hub_proposal(app: tauri::AppHandle) -> Result<String, String> {
-    propose_new_hubs(&app, true).await
-}
-
 pub async fn consolidate_vault_inner() -> Result<String, String> {
     let s = settings::load();
 
@@ -981,6 +866,35 @@ pub async fn consolidate_vault() -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_split_calibration_sections() {
+        let text = "QUI JE SUIS\nÉtudiant.\n\nMA VOIX (extraits)\ntkt azy mdr\n\nNON-NÉGOCIABLES\nSois positif.";
+        let secs = split_calibration_sections(text);
+        let map: std::collections::HashMap<_, _> = secs.into_iter().collect();
+        assert_eq!(map.get("identity.md").map(|s| s.as_str()), Some("Étudiant."));
+        assert_eq!(map.get("voice.md").map(|s| s.as_str()), Some("tkt azy mdr"));
+        assert_eq!(map.get("directives.md").map(|s| s.as_str()), Some("Sois positif."));
+    }
+
+    #[test]
+    fn test_calibration_preamble_goes_to_identity() {
+        let secs = split_calibration_sections("just some text no header");
+        assert_eq!(secs.len(), 1);
+        assert_eq!(secs[0].0, "identity.md");
+    }
+
+    #[test]
+    fn test_is_personal_note_filters() {
+        let hubs = vec!["ai".to_string(), "security".to_string()];
+        assert!(is_personal_note("identity.md", &hubs));
+        assert!(is_personal_note("passions.md", &hubs));
+        assert!(!is_personal_note("ai.md", &hubs));            // hub
+        assert!(!is_personal_note("knowledge/foo.md", &hubs)); // ingested
+        assert!(!is_personal_note("vanguard/digest-1.md", &hubs));
+        assert!(!is_personal_note("memory/user.md", &hubs));   // internal
+        assert!(!is_personal_note("self_model.md", &hubs));    // the digest itself
+    }
 
     #[test]
     fn test_consolidate_vault_inner_is_pub() {

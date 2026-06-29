@@ -301,10 +301,8 @@ pub async fn run_forge(app: AppHandle, running: Arc<AtomicBool>) {
     let mut last_event: Option<Instant> = None;
     let mut last_consolidation: Option<Instant> = None;
     let mut last_orphan_scan = Instant::now();
-    let mut last_hub_scan = Instant::now();
     let mut last_quality_audit = Instant::now();
     let orphan_interval = Duration::from_secs(2 * 60 * 60);
-    let hub_scan_interval = Duration::from_secs(4 * 60 * 60);
     let audit_interval = Duration::from_secs(24 * 60 * 60);
     let debounce = Duration::from_secs(60);
     let consolidation_cooldown = Duration::from_secs(10 * 60);
@@ -366,8 +364,6 @@ pub async fn run_forge(app: AppHandle, running: Arc<AtomicBool>) {
                     Ok(msg) => emit_status(&app, &msg),
                     Err(e) => emit_status(&app, &format!("Consolidation error: {}", e)),
                 }
-
-                let _ = crate::memory::propose_new_hubs(&app, false).await;
             } else if t.elapsed() >= debounce && !pending.is_empty() && !cooled_down {
                 // Drain pending without running consolidation — cooldown not expired
                 pending.clear();
@@ -387,11 +383,6 @@ pub async fn run_forge(app: AppHandle, running: Arc<AtomicBool>) {
                     Err(e) => emit_status(&app, &format!("Orphan consolidation error: {}", e)),
                 }
             }
-        }
-
-        if last_hub_scan.elapsed() >= hub_scan_interval {
-            last_hub_scan = Instant::now();
-            let _ = crate::memory::propose_new_hubs(&app, false).await;
         }
 
         if last_quality_audit.elapsed() >= audit_interval {

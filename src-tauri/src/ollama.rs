@@ -90,6 +90,25 @@ pub async fn chat_stream(
     Ok(full)
 }
 
+pub enum NomicTask {
+    Query,
+    Document,
+}
+
+pub fn nomic_prefix(model: &str, kind: NomicTask, text: &str) -> String {
+    if !model.starts_with("nomic-embed") {
+        return text.to_string();
+    }
+    if text.starts_with("search_query: ") || text.starts_with("search_document: ") {
+        return text.to_string();
+    }
+    let p = match kind {
+        NomicTask::Query => "search_query: ",
+        NomicTask::Document => "search_document: ",
+    };
+    format!("{}{}", p, text)
+}
+
 pub async fn embed(texts: Vec<String>, model: &str) -> Result<Vec<Vec<f32>>, String> {
     let resp: EmbedResponse = HTTP_CLIENT
         .post("http://localhost:11434/api/embed")
@@ -406,5 +425,26 @@ mod tests {
         let resp: AgentChatResponse = serde_json::from_str(json).unwrap();
         assert!(resp.message.tool_calls.is_none());
         assert_eq!(resp.message.content.unwrap(), "Hello world");
+    }
+}
+
+#[cfg(test)]
+mod nomic_tests {
+    use super::{nomic_prefix, NomicTask};
+
+    #[test]
+    fn prefixes_nomic_query_and_document() {
+        assert_eq!(nomic_prefix("nomic-embed-text:latest", NomicTask::Query, "hello"), "search_query: hello");
+        assert_eq!(nomic_prefix("nomic-embed-text:latest", NomicTask::Document, "hello"), "search_document: hello");
+    }
+
+    #[test]
+    fn leaves_non_nomic_models_untouched() {
+        assert_eq!(nomic_prefix("mxbai-embed-large", NomicTask::Query, "hello"), "hello");
+    }
+
+    #[test]
+    fn does_not_double_prefix() {
+        assert_eq!(nomic_prefix("nomic-embed-text:latest", NomicTask::Query, "search_query: hi"), "search_query: hi");
     }
 }

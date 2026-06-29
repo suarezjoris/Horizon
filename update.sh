@@ -4,6 +4,8 @@ set -e
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="$HOME/.config/horizon/settings.json"
+# Resolve uv from PATH, fall back to the default install location.
+UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 
 echo "🔍 Starting Horizon Maintenance..."
 
@@ -27,10 +29,10 @@ fi
 # ── 2. Search venv deps ───────────────────────────────────────────────────────
 if [ ! -d "$PROJECT_ROOT/.venv" ]; then
     echo "🐍 Creating search venv..."
-    ~/.local/bin/uv venv --python 3.12 "$PROJECT_ROOT/.venv" 2>/dev/null \
+    "$UV" venv --python 3.12 "$PROJECT_ROOT/.venv" 2>/dev/null \
         || python3 -m venv "$PROJECT_ROOT/.venv"
 fi
-~/.local/bin/uv pip install -q --upgrade \
+"$UV" pip install -q --upgrade \
     --python "$PROJECT_ROOT/.venv/bin/python3" \
     ddgs readability-lxml requests 2>/dev/null \
     || "$PROJECT_ROOT/.venv/bin/python3" -m pip install -q --upgrade \

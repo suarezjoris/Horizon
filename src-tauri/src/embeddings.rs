@@ -14,6 +14,87 @@ pub struct ChunkMeta {
     pub access_count: u32,      // Incremented on each retrieval
     #[serde(default)]
     pub pinned: bool,           // Parsed from frontmatter
+    #[serde(default)]
+    pub vector: Vec<f32>,       // Raw f32 embedding, for exact cosine re-score
+}
+
+pub fn chunk_markdown(content: &str, max_chars: usize) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let mut current_header = String::new();
+    let mut buf = String::new();
+
+    let flush = |buf: &mut String, header: &str, out: &mut Vec<String>| {
+        let body = buf.trim();
+        if body.is_empty() { return; }
+        if !header.is_empty() && !body.starts_with(header) {
+            out.push(format!("{}\n{}", header, body));
+        } else {
+            out.push(body.to_string());
+        }
+        buf.clear();
+    };
+
+    for block in content.split("\n\n") {
+        let trimmed = block.trim();
+        if trimmed.is_empty() { continue; }
+
+        let is_header = trimmed.lines().next()
+            .map(|l| l.starts_with('#') && l.contains(' '))
+            .unwrap_or(false);
+        if is_header {
+            flush(&mut buf, &current_header, &mut chunks);
+            current_header = trimmed.lines().next().unwrap_or("").to_string();
+        }
+
+        if buf.len() + trimmed.len() + 2 > max_chars && !buf.is_empty() {
+            flush(&mut buf, &current_header, &mut chunks);
+        }
+        if !buf.is_empty() { buf.push_str("\n\n"); }
+        buf.push_str(trimmed);
+
+        while buf.len() > max_chars {
+            let mut cut = max_chars;
+            while cut < buf.len() && !buf.is_char_boundary(cut) { cut += 1; }
+            let head: String = buf[..cut].to_string();
+            chunks.push(if !current_header.is_empty() && !head.starts_with(&current_header) {
+                format!("{}\n{}", current_header, head.trim())
+            } else { head.trim().to_string() });
+            buf = buf[cut..].trim_start().to_string();
+        }
+    }
+    flush(&mut buf, &current_header, &mut chunks);
+    chunks
+}
+
+pub fn lexical_score(query: &str, chunk: &str) -> f32 {
+    let chunk_lower = chunk.to_lowercase();
+    let terms: Vec<String> = query
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() >= 3)
+        .map(|w| w.to_string())
+        .collect();
+    if terms.is_empty() { return 0.0; }
+    let hits = terms.iter().filter(|t| chunk_lower.contains(t.as_str())).count();
+    hits as f32 / terms.len() as f32
+}
+
+pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let mut dot = 0.0f32;
+    let mut na = 0.0f32;
+    let mut nb = 0.0f32;
+    for i in 0..a.len() {
+        dot += a[i] * b[i];
+        na += a[i] * a[i];
+        nb += b[i] * b[i];
+    }
+    if na == 0.0 || nb == 0.0 {
+        return 0.0;
+    }
+    dot / (na.sqrt() * nb.sqrt())
 }
 
 pub struct VaultIndex {
@@ -46,10 +127,11 @@ impl VaultIndex {
         self.metadata.read().unwrap().is_empty()
     }
 
-    pub fn add(&mut self, vector: &[f32], meta: ChunkMeta) -> u64 {
+    pub fn add(&mut self, vector: &[f32], mut meta: ChunkMeta) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
         self.inner.add_with_ids(vector, &[id]).unwrap();
+        meta.vector = vector.to_vec();
         self.metadata.write().unwrap().insert(id, meta);
         id
     }
@@ -72,23 +154,55 @@ impl VaultIndex {
     }
 
     pub fn search(&self, query: &[f32], k: usize) -> Vec<SearchResult> {
-        let (scores, ids) = self.inner.search(query, k);
-        let mut results = Vec::new();
+        const OVERFETCH: usize = 50;
+        let (_scores, ids) = self.inner.search(query, k.max(OVERFETCH));
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
-        for i in 0..ids.len() {
-            if let Some(meta) = self.metadata.read().unwrap().get(&ids[i]) {
-                let days_since = f32::max(0.0, (now - meta.last_accessed) as f32 / 86400.0);
+        let meta = self.metadata.read().unwrap();
+        let mut results = Vec::new();
+        for &id in &ids {
+            if let Some(m) = meta.get(&id) {
+                let exact = if m.vector.is_empty() { 0.0 } else { cosine(query, &m.vector) };
+                let days_since = f32::max(0.0, (now - m.last_accessed) as f32 / 86400.0);
                 let decay_factor = (0.5_f32).powf(days_since / 30.0);
-                let final_score = scores[i] * (1.0 + (meta.access_count as f32 * 0.05)) * decay_factor;
+                let final_score = exact * (1.0 + (m.access_count as f32 * 0.05)) * decay_factor;
                 results.push(SearchResult {
-                    path: meta.path.clone(),
-                    chunk: meta.chunk.clone(),
+                    path: m.path.clone(),
+                    chunk: m.chunk.clone(),
                     score: final_score,
-                    id: ids[i],
+                    id,
                 });
             }
         }
         results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(k);
+        results
+    }
+
+    pub fn search_hybrid(&self, query_vec: &[f32], query_text: &str, k: usize, decay: bool) -> Vec<SearchResult> {
+        const OVERFETCH: usize = 50;
+        const ALPHA: f32 = 0.75; // vector weight
+        const BETA: f32 = 0.25;  // lexical weight
+        let (_scores, ids) = self.inner.search(query_vec, k.max(OVERFETCH));
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        let meta = self.metadata.read().unwrap();
+        let mut results = Vec::new();
+        for &id in &ids {
+            if let Some(m) = meta.get(&id) {
+                let exact = if m.vector.is_empty() { 0.0 } else { cosine(query_vec, &m.vector) };
+                let lex = lexical_score(query_text, &m.chunk);
+                let base = ALPHA * exact + BETA * lex;
+                let decay_factor = if decay {
+                    let days_since = f32::max(0.0, (now - m.last_accessed) as f32 / 86400.0);
+                    (0.5_f32).powf(days_since / 30.0)
+                } else {
+                    1.0
+                };
+                let final_score = base * (1.0 + (m.access_count as f32 * 0.05)) * decay_factor;
+                results.push(SearchResult { path: m.path.clone(), chunk: m.chunk.clone(), score: final_score, id });
+            }
+        }
+        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(k);
         results
     }
 
@@ -178,61 +292,13 @@ pub async fn reindex() -> Result<usize, String> {
         let Ok(content) = crate::vault::read_vault_note(&s.vault_path, rel_path) else { continue };
         let pinned = content.starts_with("---\n") && content.contains("pinned: true");
         
-        let mut chunks = Vec::new();
-        let mut current_header = String::new();
-        let mut current_chunk = String::new();
-        
-        for line in content.lines() {
-            if line.starts_with('#') && line.contains(' ') {
-                let parts: Vec<&str> = line.splitn(2, ' ').collect();
-                if parts[0].chars().all(|c| c == '#') {
-                    current_header = line.to_string();
-                }
-            }
-            
-            if !current_chunk.is_empty() {
-                current_chunk.push('\n');
-            }
-            current_chunk.push_str(line);
-            
-            if current_chunk.len() >= 1000 {
-                let chunk_to_save = if !current_header.is_empty() && !current_chunk.starts_with(&current_header) {
-                    format!("{}\n{}", current_header, current_chunk)
-                } else {
-                    current_chunk.clone()
-                };
-                chunks.push(chunk_to_save);
-                
-                let overlap_size = 200;
-                if current_chunk.len() > overlap_size {
-                    let target = current_chunk.len() - overlap_size;
-                    let mut split_point = target;
-                    while split_point < current_chunk.len() && !current_chunk.is_char_boundary(split_point) {
-                        split_point += 1;
-                    }
-                    if let Some(next_space) = current_chunk[split_point..].find(|c: char| c.is_whitespace()) {
-                        current_chunk = current_chunk[split_point + next_space..].trim_start().to_string();
-                    } else {
-                        current_chunk = current_chunk[split_point..].trim_start().to_string();
-                    }
-                } else {
-                    current_chunk.clear();
-                }
-            }
-        }
-        
-        if !current_chunk.trim().is_empty() {
-            let chunk_to_save = if !current_header.is_empty() && !current_chunk.starts_with(&current_header) {
-                format!("{}\n{}", current_header, current_chunk)
-            } else {
-                current_chunk.clone()
-            };
-            chunks.push(chunk_to_save);
-        }
-
+        let chunks = chunk_markdown(&content, 1000);
         if chunks.is_empty() { continue; }
         
-        let vectors = crate::ollama::embed(chunks.clone(), "nomic-embed-text:latest").await?;
+        let prefixed: Vec<String> = chunks.iter()
+            .map(|c| crate::ollama::nomic_prefix("nomic-embed-text:latest", crate::ollama::NomicTask::Document, c))
+            .collect();
+        let vectors = crate::ollama::embed(prefixed, "nomic-embed-text:latest").await?;
         for (chunk, vector) in chunks.into_iter().zip(vectors) {
             new_index.add(&vector, ChunkMeta {
                 path: rel_path.clone(),
@@ -241,6 +307,7 @@ pub async fn reindex() -> Result<usize, String> {
                 last_accessed: now,
                 access_count: 0,
                 pinned,
+                vector: vec![],
             });
         }
     }
@@ -259,4 +326,123 @@ pub async fn reindex() -> Result<usize, String> {
     let idx = load_index(&s.embeddings_path);
     let len = idx.metadata.read().unwrap().len();
     Ok(len)
+}
+
+#[cfg(test)]
+mod lexical_tests {
+    use super::lexical_score;
+
+    #[test]
+    fn all_terms_present_scores_one() {
+        assert!((lexical_score("rust tauri", "I build with Rust and Tauri") - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn no_terms_present_scores_zero() {
+        assert_eq!(lexical_score("python django", "rust tauri app"), 0.0);
+    }
+
+    #[test]
+    fn partial_overlap_is_fractional() {
+        let s = lexical_score("rust python", "rust only here");
+        assert!(s > 0.0 && s < 1.0);
+    }
+}
+
+#[cfg(test)]
+mod decay_tests {
+    use super::*;
+
+    fn old_chunk_index() -> VaultIndex {
+        let mut idx = VaultIndex::new();
+        let mut v = vec![0.0f32; 768]; v[0] = 1.0;
+        let old = ChunkMeta {
+            path: "identity.md".into(), chunk: "I love rust".into(),
+            created_at: 0, last_accessed: 0, access_count: 0, pinned: false, vector: vec![],
+        };
+        idx.add(&v, old);
+        idx
+    }
+
+    #[test]
+    fn decay_off_scores_higher_than_decay_on_for_old_chunk() {
+        let idx = old_chunk_index();
+        let mut q = vec![0.0f32; 768]; q[0] = 1.0;
+        let with = idx.search_hybrid(&q, "rust", 1, true);
+        let without = idx.search_hybrid(&q, "rust", 1, false);
+        assert!(without[0].score >= with[0].score);
+    }
+}
+
+#[cfg(test)]
+mod chunk_tests {
+    use super::chunk_markdown;
+
+    #[test]
+    fn splits_on_headers() {
+        let md = "# A\nalpha text\n\n# B\nbeta text";
+        let chunks = chunk_markdown(md, 1000);
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[0].contains("alpha"));
+        assert!(chunks[1].contains("beta"));
+    }
+
+    #[test]
+    fn long_section_splits_on_paragraphs_under_cap() {
+        let para = "word ".repeat(300);
+        let md = format!("# Big\n{}\n\n{}", para, para);
+        let chunks = chunk_markdown(&md, 1000);
+        assert!(chunks.len() >= 2);
+        assert!(chunks.iter().all(|c| c.len() <= 1100));
+    }
+
+    #[test]
+    fn empty_input_yields_no_chunks() {
+        assert!(chunk_markdown("", 1000).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod cosine_tests {
+    use super::cosine;
+
+    #[test]
+    fn identical_vectors_score_one() {
+        let v = vec![1.0, 2.0, 3.0];
+        assert!((cosine(&v, &v) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn orthogonal_vectors_score_zero() {
+        assert!(cosine(&[1.0, 0.0], &[0.0, 1.0]).abs() < 1e-6);
+    }
+
+    #[test]
+    fn empty_or_zero_is_zero() {
+        assert_eq!(cosine(&[], &[]), 0.0);
+        assert_eq!(cosine(&[0.0, 0.0], &[1.0, 1.0]), 0.0);
+    }
+}
+
+#[cfg(test)]
+mod rerank_tests {
+    use super::*;
+
+    #[test]
+    fn exact_cosine_reorders_candidates() {
+        let mut idx = VaultIndex::new();
+        let now = 0i64;
+        let mk = |p: &str| ChunkMeta {
+            path: p.into(), chunk: p.into(), created_at: now,
+            last_accessed: now, access_count: 0, pinned: false, vector: vec![],
+        };
+        let mut a = vec![0.0f32; 768]; a[0] = 1.0;
+        let mut b = vec![0.0f32; 768]; b[1] = 1.0;
+        idx.add(&a, mk("a.md"));
+        idx.add(&b, mk("b.md"));
+
+        let mut q = vec![0.0f32; 768]; q[1] = 1.0;
+        let results = idx.search(&q, 2);
+        assert_eq!(results[0].path, "b.md");
+    }
 }

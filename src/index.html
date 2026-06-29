@@ -43,7 +43,25 @@
       <div id="onboarding-title">Initial Calibration</div>
     </div>
     <p id="onboarding-desc">Tell Horizon who you are. Your skills, your style, your dreams. This will form the core of your AI's personalized latent space.</p>
-    <textarea id="onboarding-input" placeholder="Example: I am a senior Rust developer who loves clean architecture and dark chocolate. I prefer concise answers and I am currently building a personal OS..."></textarea>
+    <textarea id="onboarding-input" placeholder="Remplis ces sections (garde les titres en MAJUSCULES, ils sont reconnus tels quels) :
+
+QUI JE SUIS
+…
+
+COMMENT JE PENSE
+…
+
+CE QUE JE CONSTRUIS
+…
+
+HOBBIES
+…
+
+MA VOIX (colle de vrais messages que tu as écrits, bruts)
+…
+
+NON-NÉGOCIABLES (règles de comportement pour l'IA)
+…"></textarea>
     <div id="onboarding-footer">
       <button id="submit-calibration-btn">Calibrate Horizon</button>
     </div>
@@ -96,17 +114,6 @@
   </div>
 </div>
 
-<!-- Hub Proposal Banner (shown by Forge when a new topic cluster is detected) -->
-<div id="hub-proposal-banner" style="display:none; position:fixed; bottom:80px; right:20px; z-index:9999; background:var(--surface,#E8E6DD); border:2px solid var(--carbon,#111110); padding:16px 20px; max-width:340px; box-shadow:5px 5px 0 var(--carbon,#111110);">
-  <div class="mono" style="font-size:10px; color:var(--label-orange,#c43a0c); font-weight:700; letter-spacing:0.16em; text-transform:uppercase; margin-bottom:6px;">// FORGE DETECTED NEW TOPIC</div>
-  <div id="hub-proposal-name" class="wide" style="font-size:18px; color:var(--carbon,#111110); margin-bottom:4px;"></div>
-  <div id="hub-proposal-desc" style="font-size:12px; color:var(--text-dim,#54524a); margin-bottom:8px; font-weight:500;"></div>
-  <div id="hub-proposal-keywords" class="mono" style="font-size:10px; color:var(--text-faint,#8a897d); letter-spacing:0.08em; margin-bottom:12px;"></div>
-  <div style="display:flex; gap:8px;">
-    <button id="hub-proposal-confirm" class="mono cut" style="flex:1; background:var(--signal,#E8FF00); color:var(--carbon,#111110); border:2px solid var(--carbon,#111110); padding:8px; font-weight:800; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; cursor:pointer;">Create Hub</button>
-    <button id="hub-proposal-dismiss" class="mono" style="flex:1; background:var(--surface-light,#f0eee6); color:var(--carbon,#111110); border:2px solid var(--carbon,#111110); padding:8px; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; cursor:pointer;">Dismiss</button>
-  </div>
-</div>
 
 
 
@@ -500,6 +507,24 @@
       <textarea id="inpaint-negative" rows="1" placeholder="Negative prompt (optional)"></textarea>
     </div>
     <button id="inpaint-submit-btn">🎨 Generate Inpainting</button>
+  </div>
+</div>
+
+<div id="pax-banner" style="display:none; position:fixed; bottom:80px; right:20px; z-index:9999; background:var(--surface,#E8E6DD); border:2px solid var(--carbon,#111110); padding:16px 20px; max-width:340px; box-shadow:5px 5px 0 var(--carbon,#111110);">
+  <div class="mono" style="font-size:10px; color:var(--label-orange,#c43a0c); font-weight:700; letter-spacing:0.16em; text-transform:uppercase; margin-bottom:6px;">// HORIZON EST CURIEUX</div>
+  <div id="pax-banner-question" style="font-size:13px; color:var(--carbon,#111110); margin-bottom:12px; font-weight:500;"></div>
+  <div style="display:flex; gap:8px;">
+    <button id="pax-banner-open" class="mono cut" style="flex:1; background:var(--signal,#E8FF00); color:var(--carbon,#111110); border:2px solid var(--carbon,#111110); padding:8px; font-weight:800; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; cursor:pointer;">Répondre</button>
+    <button id="pax-banner-dismiss" class="mono" style="flex:1; background:var(--surface-light,#f0eee6); color:var(--carbon,#111110); border:2px solid var(--carbon,#111110); padding:8px; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; cursor:pointer;">Plus tard</button>
+  </div>
+</div>
+
+<div id="topic-banner" style="display:none; position:fixed; bottom:80px; right:20px; z-index:9999; background:var(--surface,#E8E6DD); border:2px solid var(--carbon,#111110); padding:16px 20px; max-width:340px; box-shadow:5px 5px 0 var(--carbon,#111110);">
+  <div class="mono" style="font-size:10px; color:var(--label-orange,#c43a0c); font-weight:700; letter-spacing:0.16em; text-transform:uppercase; margin-bottom:6px;">// APPROFONDIR UN SUJET</div>
+  <div id="topic-banner-text" style="font-size:13px; color:var(--carbon,#111110); margin-bottom:12px; font-weight:500;"></div>
+  <div style="display:flex; gap:8px;">
+    <button id="topic-banner-confirm" class="mono cut" style="flex:1; background:var(--signal,#E8FF00); color:var(--carbon,#111110); border:2px solid var(--carbon,#111110); padding:8px; font-weight:800; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; cursor:pointer;">Oui, remplis</button>
+    <button id="topic-banner-dismiss" class="mono" style="flex:1; background:var(--surface-light,#f0eee6); color:var(--carbon,#111110); border:2px solid var(--carbon,#111110); padding:8px; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; cursor:pointer;">Non</button>
   </div>
 </div>
 

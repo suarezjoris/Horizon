@@ -12,30 +12,68 @@ echo "🚀 Starting Horizon Installation..."
 # ── 1. Detect distro ──────────────────────────────────────────────────────────
 echo "📦 Installing system dependencies..."
 if command -v pacman &>/dev/null; then
+    # Arch, Manjaro, EndeavourOS, Garuda…
     sudo pacman -Sy --needed --noconfirm \
         webkit2gtk-4.1 base-devel curl wget git bubblewrap \
         openblas nspr nss at-spi2-core libdrm mesa \
         libxcomposite libxdamage libxfixes libxrandr alsa-lib pango cairo \
         python python-pip
 elif command -v apt-get &>/dev/null; then
+    # Debian, Ubuntu, Mint, Pop!_OS, elementary, Kali…
     sudo apt-get update -qq
     sudo apt-get install -y \
-        libwebkit2gtk-4.1-dev build-essential curl wget git bubblewrap \
-        libssl-dev libgtk-3-dev libsoup-3.0-dev \
-        libjavascriptcoregtk-4.1-dev librsvg2-dev \
+        build-essential curl wget git bubblewrap \
+        libssl-dev libgtk-3-dev librsvg2-dev \
         python3 python3-pip python3-venv
+    # webkit/soup/jsc: try 4.1 (newer), fall back to 4.0 (older Ubuntu/Debian)
+    sudo apt-get install -y libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev \
+        || sudo apt-get install -y libwebkit2gtk-4.0-dev libjavascriptcoregtk-4.0-dev libsoup2.4-dev
 elif command -v dnf &>/dev/null; then
+    # Fedora, RHEL 8+, Rocky, Alma, CentOS Stream…
     sudo dnf install -y \
         webkit2gtk4.1-devel gcc make curl wget git bubblewrap \
         openssl-devel gtk3-devel libsoup3-devel \
-        python3 python3-pip
+        python3 python3-pip \
+        || sudo dnf install -y \
+        webkit2gtk3-devel gcc make curl wget git bubblewrap \
+        openssl-devel gtk3-devel libsoup-devel python3 python3-pip
 elif command -v zypper &>/dev/null; then
+    # openSUSE Leap / Tumbleweed
     sudo zypper install -y \
         webkit2gtk3-devel gcc make curl wget git bubblewrap \
         libopenssl-devel gtk3-devel libsoup3-devel \
         python3 python3-pip
+elif command -v yum &>/dev/null; then
+    # Older RHEL / CentOS 7
+    sudo yum install -y \
+        webkit2gtk3-devel gcc make curl wget git bubblewrap \
+        openssl-devel gtk3-devel libsoup-devel python3 python3-pip
+elif command -v apk &>/dev/null; then
+    # Alpine (musl — best effort)
+    sudo apk add --no-cache \
+        webkit2gtk-dev build-base curl wget git bubblewrap \
+        openssl-dev gtk+3.0-dev libsoup3-dev librsvg-dev \
+        python3 py3-pip
+elif command -v xbps-install &>/dev/null; then
+    # Void Linux
+    sudo xbps-install -Sy \
+        webkit2gtk-devel base-devel curl wget git bubblewrap \
+        openssl-devel gtk+3-devel libsoup3-devel librsvg-devel \
+        python3 python3-pip
+elif command -v eopkg &>/dev/null; then
+    # Solus
+    sudo eopkg install -y -c system.devel
+    sudo eopkg install -y \
+        libwebkit-gtk-devel curl wget git bubblewrap \
+        openssl-devel libgtk-3-devel libsoup-devel librsvg-devel \
+        python3
 else
-    echo "⚠️  Unknown distro — install manually: libwebkit2gtk-4.1, build tools, bubblewrap, python3"
+    echo "⚠️  Unsupported package manager. Install these dependencies manually, then re-run:"
+    echo "    • WebKitGTK 4.1 (or 4.0) dev headers + libsoup3 (or 2.4) + javascriptcoregtk dev"
+    echo "    • GTK3 dev, librsvg dev, OpenSSL dev"
+    echo "    • a C toolchain (gcc/make), curl, wget, git, bubblewrap, python3 + pip"
+    echo "    (Gentoo: emerge the equivalents; NixOS: a shell with these in buildInputs.)"
+    read -p "Press Enter once dependencies are installed to continue, or Ctrl-C to abort... " _
 fi
 
 # ── 2. Rust ───────────────────────────────────────────────────────────────────

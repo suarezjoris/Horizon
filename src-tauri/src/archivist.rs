@@ -144,6 +144,7 @@ pub async fn run_archivist(app: AppHandle, running: Arc<AtomicBool>) {
                                     last_accessed: now,
                                     access_count: 0,
                                     pinned,
+                                    vector: vec![],
                                 });
                             }
                         }

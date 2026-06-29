@@ -180,6 +180,12 @@ async function send() {
   let llmText = userText;
   let displayText = userText;
 
+  if (curiosityAnswered && userText) {
+    invoke('curiosity_mark_answered', { question: curiosityAnswered }).catch(() => {});
+    curiosityAnswered = null;
+  }
+  resetCuriosityIdle();
+
   if (!userText && !attachedFilesText) return;
   if (sendBtn.disabled) return;
   
@@ -377,20 +383,8 @@ async function send() {
           : 'none';
         bubble.innerHTML = DOMPurify.sanitize(marked.parse(
           `## Vault Topic Health\n\n**Active hubs** (${status.hubs.length}):\n${hubLines}\n\n` +
-          `**Uncategorized notes** (${status.uncategorized_count}): ${uncatList}\n\n` +
-          `*Use \`/analyze-topics\` to have Forge propose a new hub.*`
+          `**Uncategorized notes** (${status.uncategorized_count}): ${uncatList}`
         ));
-      } catch (err) {
-        bubble.textContent = `Failed: ${err}`;
-      }
-      return;
-    }
-
-    if (cmd === 'analyze-topics') {
-      const bubble = addBubble('ai', 'Forge is analyzing uncategorized notes…');
-      try {
-        const msg = await invoke('trigger_hub_proposal');
-        bubble.textContent = msg;
       } catch (err) {
         bubble.textContent = `Failed: ${err}`;
       }
@@ -580,28 +574,87 @@ if (exportPdfBtn) {
 }
 
 let pendingPaxBannerQuestion = null;
+let curiosityAnswered = null; // question awaiting the user's reply, to mark answered
+let idleTimer = null;
+const IDLE_MS = 150000; // 2.5 min
+let pendingTopic = null;
+let curiosityCycles = 0;
 
-listen('pax-banner', (event) => {
-    const q = event.payload.question;
-    pendingPaxBannerQuestion = q;
-    document.getElementById('pax-banner-question').textContent = q;
-    document.getElementById('pax-banner').style.display = 'block';
-});
+function resetCuriosityIdle() {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(fireCuriosity, IDLE_MS);
+}
+
+async function fireWorldLane() {
+    if (document.getElementById('topic-banner').style.display === 'block') return false;
+    try {
+        const topic = await invoke('curiosity_propose_topic');
+        if (!topic) return false;
+        pendingTopic = topic;
+        document.getElementById('topic-banner-text').textContent =
+            `Le sujet « ${topic} » t'intéresse mais je n'ai rien dessus. Je l'approfondis ?`;
+        document.getElementById('topic-banner').style.display = 'block';
+        return true;
+    } catch (e) { console.error('topic propose failed', e); return false; }
+}
+
+async function fireCuriosity() {
+    if (document.getElementById('pax-banner').style.display === 'block') return;
+    curiosityCycles++;
+    if (curiosityCycles % 3 === 0 && await fireWorldLane()) return;
+    try {
+        const q = await invoke('curiosity_next_question');
+        if (!q) { resetCuriosityIdle(); return; }
+        pendingPaxBannerQuestion = q;
+        document.getElementById('pax-banner-question').textContent = q;
+        document.getElementById('pax-banner').style.display = 'block';
+    } catch (e) {
+        console.error('curiosity failed', e);
+    }
+}
 
 document.getElementById('pax-banner-open')?.addEventListener('click', () => {
     document.getElementById('pax-banner').style.display = 'none';
     if (!pendingPaxBannerQuestion) return;
     switchTab('llm');
     addBubble('ai', pendingPaxBannerQuestion);
-    pendingPaxQuestion = pendingPaxBannerQuestion;
-    history.scrollTop = history.scrollHeight;
+    messages.push({ role: 'assistant', content: pendingPaxBannerQuestion });
+    curiosityAnswered = pendingPaxBannerQuestion;
     pendingPaxBannerQuestion = null;
+    history.scrollTop = history.scrollHeight;
+    input.focus();
 });
 
 document.getElementById('pax-banner-dismiss')?.addEventListener('click', () => {
     document.getElementById('pax-banner').style.display = 'none';
     pendingPaxBannerQuestion = null;
+    resetCuriosityIdle();
 });
+
+document.getElementById('topic-banner-confirm')?.addEventListener('click', async () => {
+    document.getElementById('topic-banner').style.display = 'none';
+    if (!pendingTopic) return;
+    const t = pendingTopic; pendingTopic = null;
+    addBubble('system', `*Recherche en cours sur « ${t} »...*`);
+    try {
+        const msg = await invoke('curiosity_fill_topic', { topic: t });
+        addBubble('system', `*${msg}*`);
+    } catch (e) { addBubble('system', `*Échec: ${e}*`); }
+    resetCuriosityIdle();
+});
+
+document.getElementById('topic-banner-dismiss')?.addEventListener('click', () => {
+    document.getElementById('topic-banner').style.display = 'none';
+    if (pendingTopic) { invoke('curiosity_dismiss_topic', { topic: pendingTopic }).catch(() => {}); }
+    pendingTopic = null;
+    resetCuriosityIdle();
+});
+
+['keydown', 'click'].forEach(evt => {
+    history?.addEventListener(evt, resetCuriosityIdle);
+    input?.addEventListener(evt, resetCuriosityIdle);
+});
+resetCuriosityIdle();
 
 function isRunnable(lang) {
     return ['python', 'python3', 'bash', 'sh', 'javascript', 'js', 'node', 'rust'].includes(lang.toLowerCase());

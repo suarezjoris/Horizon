@@ -13,6 +13,7 @@ fn is_blocked_domain(url: &str) -> bool {
 pub async fn duckduckgo_search(query: &str) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
+        .timeout(std::time::Duration::from_secs(20))
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -228,8 +229,12 @@ pub async fn super_rag(query: &str, text: &str, top_k: usize) -> Result<String, 
         return Ok(String::new());
     }
 
-    let chunk_vectors = crate::ollama::embed(chunks.clone(), "nomic-embed-text:latest").await?;
-    let query_vector = crate::ollama::embed(vec![query.to_string()], "nomic-embed-text:latest").await?;
+    let prefixed_chunks: Vec<String> = chunks.iter()
+        .map(|c| crate::ollama::nomic_prefix("nomic-embed-text:latest", crate::ollama::NomicTask::Document, c))
+        .collect();
+    let chunk_vectors = crate::ollama::embed(prefixed_chunks, "nomic-embed-text:latest").await?;
+    let q_prefixed = crate::ollama::nomic_prefix("nomic-embed-text:latest", crate::ollama::NomicTask::Query, query);
+    let query_vector = crate::ollama::embed(vec![q_prefixed], "nomic-embed-text:latest").await?;
 
     if query_vector.is_empty() || chunk_vectors.is_empty() {
         return Ok(text.chars().take(3000).collect());
@@ -244,6 +249,7 @@ pub async fn super_rag(query: &str, text: &str, top_k: usize) -> Result<String, 
             last_accessed: 0,
             access_count: 0,
             pinned: false,
+            vector: vec![],
         });
     }
 
