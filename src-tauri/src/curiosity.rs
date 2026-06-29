@@ -148,7 +148,7 @@ pub async fn curiosity_next_question(
         .map(|a| a.question.clone())
         .collect();
 
-    let prompt = build_question_prompt(&facet, &asked_in_facet);
+    let prompt = build_question_prompt(&facet, &passions, &asked_in_facet);
     let raw = crate::ollama::chat_once(
         vec![serde_json::json!({"role": "user", "content": prompt})],
         &s.agents.light_model,
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn build_question_prompt_lists_avoid_set_and_facet() {
-        let p = build_question_prompt("hobby_depth:piano", &["Tu joues quoi ?".to_string()]);
+        let p = build_question_prompt("hobby_depth:piano", "", &["Tu joues quoi ?".to_string()]);
         assert!(p.contains("hobby_depth:piano"));
         assert!(p.contains("Tu joues quoi ?"));
         assert!(p.to_lowercase().contains("une seule question"));
